@@ -2,6 +2,7 @@ using System.CommandLine.Invocation;
 using Hermes.Memory.Core.Db;
 using Hermes.Memory.Core.Embeddings;
 using Hermes.Memory.Core.Journal;
+using Hermes.Memory.Core.Kanban;
 using Hermes.Memory.Core.Memory;
 using Hermes.Memory.Core.Metrics;
 using Hermes.Memory.Core.Models;
@@ -56,6 +57,7 @@ public static class McpHost
                 services.AddSingleton<JournalRepository>();
                 services.AddSingleton<SkillsRepository>();
                 services.AddSingleton<MetricsRepository>();
+                services.AddSingleton<KanbanRepository>();
 
                 // MCP tool types — each [McpServerToolType] is registered.
                 services.AddMcpServer()
@@ -64,7 +66,8 @@ public static class McpHost
                     .WithTools<WikiTools>()
                     .WithTools<JournalTools>()
                     .WithTools<SkillsTools>()
-                    .WithTools<MetricsTools>();
+                    .WithTools<MetricsTools>()
+                    .WithTools<KanbanTools>();
             });
 
     public static async Task<int> RunAsync(string[] args)

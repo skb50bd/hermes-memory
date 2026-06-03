@@ -10,11 +10,12 @@ platform with five surfaces, all behind a single stdio MCP server:
 
 | Surface | When to use |
 |---|---|
-| **memory** | "Remember that..." / "What did I tell you about X?" / atomic facts the agent should recall across sessions |
-| **wiki** | Long-form documents with wikilinks and categories. The agent's knowledge base, browsable |
-| **journal** | Conversation logs. FTS-searchable. Use for "what did we discuss last Tuesday?" |
-| **skills** | Catalog index of installed skills. Search + link graph (depends_on, supersedes, related) |
-| **metrics** | Operational telemetry (latencies, cache hit rates, tool call counts). Aggregations, not raw reads |
+| **Memory** | "Remember that..." / "What did I tell you about X?" / atomic facts the agent should recall across sessions |
+| **Wiki** | Long-form documents with wikilinks and categories. The agent's knowledge base, browsable |
+| **Journal** | Conversation logs. FTS-searchable. Use for "what did we discuss last Tuesday?" |
+| **Skills** | Catalog index of installed skills. Search + link graph (depends_on, supersedes, related) |
+| **Metrics** | Operational telemetry (latencies, cache hit rates, tool call counts). Aggregations, not raw reads |
+| **Kanban** | Multi-tenant task dispatcher. SQLite's old home; now in Postgres. Race-free claim via `SKIP LOCKED`. |
 
 ## 1. Before you start
 
@@ -79,6 +80,43 @@ skill_graph(root_skill="hermes-memory", max_hops=2)
 
 `kind` ∈ `{depends_on, supersedes, related, see_also}`. The graph query
 walks N hops, deduplicates, and returns edges grouped by kind.
+
+## 5b. Kanban
+
+Multi-tenant task dispatcher. The first-class replacement for the
+old `~/.hermes/kanban/boards/*/kanban.db` SQLite files. Tenants
+replace the free-form `tasks.tenant` text column. Tasks are claimed
+race-free via `SELECT ... FOR UPDATE SKIP LOCKED`.
+
+```python
+# Manage tenants (boards)
+kanban_tenant_create(slug="sv", name="SportsVerse", icon="🪽")
+kanban_tenants(include_archived=False)
+
+# Create + list tasks
+kanban_create(id="t_abc123", tenant_slug="sv", title="Fix the bug", body="...", priority=10, status="ready")
+kanban_list(tenant_slug="sv", status="ready", limit=50)
+kanban_get(id="t_abc123")
+
+# Dispatcher (worker process): race-free claim
+claimed = kanban_claim(assignee="worker_1", max_runtime_seconds=3600)
+# claimed is null if another worker grabbed the task
+kanban_heartbeat(id="t_abc123")
+kanban_complete(id="t_abc123", summary="fixed in PR #42", result="https://github.com/...")
+kanban_fail(id="t_abc123", error="timeout", status="blocked")
+
+# Comments, history, links
+kanban_comment(id="t_abc123", body="investigating")
+kanban_history(id="t_abc123", limit=50)
+kanban_link(parent_id="t_parent", child_id="t_abc123")
+kanban_children(parent_id="t_parent")
+
+# Notify subscriptions (Discord/Telegram channels watching a task)
+kanban_subscribe(id="t_abc123", platform="discord", chat_id="...", thread_id="...")
+```
+
+Status enum: `ready`, `running`, `blocked`, `done`, `crashed`, `timed_out`, `failed`, `archived`, `cancelled`.
+Claim returns `{"claimed": true, task: {...}}` on success, `{"claimed": false}` on miss.
 
 ## 6. Metrics
 

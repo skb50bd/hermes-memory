@@ -1,13 +1,13 @@
 # hermes-memory
 
-Postgres-backed memory, wiki, journal, skills catalog, and operational
-metrics for the Hermes Agent platform. Single-binary, stdio MCP,
-NativeAOT.
+Postgres-backed memory, wiki, journal, skills catalog, **kanban**,
+and operational metrics for the Hermes Agent platform. Single-binary,
+stdio MCP, NativeAOT.
 
-> 🚧 **v0.1.0 scaffold.** This is a greenfield repo. The previous
-> `hermes-postgres-memory` Python plugin's features are now exposed
-> as MCP tools in this binary. See `skills/hermes-memory/SKILL.md`
-> for the agent's reference.
+> 🚧 **v0.2.0 — kanban landed.** The old `~/.hermes/kanban/boards/*/kanban.db`
+> SQLite files are now superseded by a `hermes_kanban` schema in the same
+> Postgres. Race-free dispatch via `SELECT ... FOR UPDATE SKIP LOCKED`.
+> See `KANBAN-PLAN.md` for the migration design.
 
 ## What you get
 
@@ -18,6 +18,7 @@ NativeAOT.
 | **Journal** | `hermes_journal.messages` (regular partitioned table) | `journal_log_session`, `journal_log_message`, `journal_search` |
 | **Skills** | `hermes_skills.skills` + `skill_links` | `skill_index_search`, `skill_register`, `skill_link`, `skill_graph` |
 | **Metrics** | `hermes_metrics.events` (timescaledb hypertable) | `metrics_record`, `metrics_query` |
+| **Kanban** | `hermes_kanban.tasks` + 7 related tables (tenants, task_runs, task_events, task_links, task_comments, task_attachments, notify_subs) | 17 tools: `kanban_create`, `kanban_list`, `kanban_get`, `kanban_claim`, `kanban_heartbeat`, `kanban_complete`, `kanban_fail`, `kanban_comment`, `kanban_history`, `kanban_link`, `kanban_children`, `kanban_parents`, `kanban_tenants`, `kanban_tenant_create`, `kanban_subscribe`, `kanban_unsubscribe`, `kanban_search` |
 
 20 MCP tools over stdio. Single 30MB statically-linked C# binary. No
 HTTP, no ports to expose, no service to deploy.
