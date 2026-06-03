@@ -4,10 +4,12 @@ Postgres-backed memory, wiki, journal, skills catalog, **kanban**,
 and operational metrics for the Hermes Agent platform. Single-binary,
 stdio MCP, NativeAOT.
 
-> 🚧 **v0.2.0 — kanban landed.** The old `~/.hermes/kanban/boards/*/kanban.db`
-> SQLite files are now superseded by a `hermes_kanban` schema in the same
-> Postgres. Race-free dispatch via `SELECT ... FOR UPDATE SKIP LOCKED`.
-> See `KANBAN-PLAN.md` for the migration design.
+> 🚧 **v0.3.0 — kanban plugin ships.** The old
+> `~/.hermes/kanban/boards/*/kanban.db` SQLite files are now superseded
+> by a `hermes_kanban` schema in the same Postgres. Race-free dispatch
+> via `SELECT ... FOR UPDATE SKIP LOCKED`. **The new Python plugin is
+> the kanban provider; the old SQLite plugin is replaced by a thin
+> shim at `hermes_cli/kanban_db.py`.**
 
 ## What you get
 
@@ -18,10 +20,12 @@ stdio MCP, NativeAOT.
 | **Journal** | `hermes_journal.messages` (regular partitioned table) | `journal_log_session`, `journal_log_message`, `journal_search` |
 | **Skills** | `hermes_skills.skills` + `skill_links` | `skill_index_search`, `skill_register`, `skill_link`, `skill_graph` |
 | **Metrics** | `hermes_metrics.events` (timescaledb hypertable) | `metrics_record`, `metrics_query` |
-| **Kanban** | `hermes_kanban.tasks` + 7 related tables (tenants, task_runs, task_events, task_links, task_comments, task_attachments, notify_subs) | 17 tools: `kanban_create`, `kanban_list`, `kanban_get`, `kanban_claim`, `kanban_heartbeat`, `kanban_complete`, `kanban_fail`, `kanban_comment`, `kanban_history`, `kanban_link`, `kanban_children`, `kanban_parents`, `kanban_tenants`, `kanban_tenant_create`, `kanban_subscribe`, `kanban_unsubscribe`, `kanban_search` |
+| **Kanban** | `hermes_kanban.tasks` + 9 related tables (tenants, task_runs, task_events, task_links, task_comments, task_attachments, tags, task_tags, notify_subs) | 17 tools: `kanban_create`, `kanban_list`, `kanban_get`, `kanban_claim`, `kanban_heartbeat`, `kanban_complete`, `kanban_fail`, `kanban_comment`, `kanban_history`, `kanban_link`, `kanban_children`, `kanban_parents`, `kanban_tenants`, `kanban_tenant_create`, `kanban_subscribe`, `kanban_unsubscribe`, `kanban_search` |
 
-20 MCP tools over stdio. Single 30MB statically-linked C# binary. No
-HTTP, no ports to expose, no service to deploy.
+The Python plugin at `~/repos/hermes-postgres-memory/plugins/kanban/postgres/`
+ships the runtime now. The C# binary is the long-term path but doesn't
+ship yet. The thin shim at `hermes_cli/kanban_db.py` makes the swap
+invisible to the dispatcher and dashboard.
 
 ## Architecture
 
