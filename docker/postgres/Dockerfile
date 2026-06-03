@@ -51,31 +51,27 @@ RUN curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
     && apt-get update
 
 # ---- Install the 4 packaged extensions ----
-# postgresql-${PG_MAJOR}-postgis-3 may not exist for ${PG_MAJOR}=18 in all
-# distros. If apt-get fails on that one line, build PostGIS from source.
-RUN apt-get install -y --no-install-recommends \
-        postgresql-${PG_MAJOR}-postgis-3 \
-        postgresql-${PG_MAJOR}-pg-cron \
-        timescaledb-2-postgresql-${PG_MAJOR} \
-    && rm -rf /var/lib/apt/lists/* \
-    || (echo "PostGIS apt install failed, will need source build" && exit 1)
-
-# ---- Apache AGE: try PGDG, fall back to source build ----
-# PGDG may or may not have apache-age packaged for PG 18 at the time of build.
-RUN (apt-get install -y --no-install-recommends postgresql-${PG_MAJOR}-age \
-        && echo "AGE installed from apt" \
-    ) \
-    || ( \
-        echo "AGE not in apt — building from source" \
-        && cd /tmp \
-        && git clone --branch v${AGE_VERSION} --depth 1 \
-              https://github.com/apache/age.git age-src \
-        && cd age-src \
-        && make PG_CONFIG=/usr/bin/pg_config \
-        && make install PG_CONFIG=/usr/bin/pg_config \
-        && cd / \
-        && rm -rf /tmp/age-src \
-    )
+# Verified package names on bookworm + PGDG + PG 18:
+#   postgresql-18-postgis-3, postgresql-18-cron, postgresql-18-timescaledb, postgresql-18-age
+# Note: the timescale package is `timescaledb`, NOT `timescaledb-2`.
+# Each install is wrapped individually so a single failure surfaces the
+# real package name in the error rather than masking it.
+RUN apt-get install -y --no-install-recommends postgresql-${PG_MAJOR}-postgis-3 \
+    || (echo "postgis install failed" && exit 1)
+RUN apt-get install -y --no-install-recommends postgresql-${PG_MAJOR}-cron \
+    || (echo "pg_cron install failed" && exit 1)
+RUN apt-get install -y --no-install-recommends postgresql-${PG_MAJOR}-timescaledb \
+    || (echo "timescaledb install failed" && exit 1)
+RUN apt-get install -y --no-install-recommends postgresql-${PG_MAJOR}-age \
+    || (echo "age install failed — falling back to source build" && \
+        cd /tmp && \
+        git clone --branch v${AGE_VERSION} --depth 1 https://github.com/apache/age.git age-src && \
+        cd age-src && \
+        make PG_CONFIG=/usr/bin/pg_config && \
+        make install PG_CONFIG=/usr/bin/pg_config && \
+        cd / && \
+        rm -rf /tmp/age-src)
+RUN rm -rf /var/lib/apt/lists/*
 
 # ---- Re-install runtime packages (the source build strip above is fine) ----
 # No-op, just keep the layer explicit
@@ -84,20 +80,52 @@ RUN (apt-get install -y --no-install-recommends postgresql-${PG_MAJOR}-age \
 # pg_cron schedules background jobs (must run first to register workers)
 # timescaledb hooks the executor (must be present before user DDL hits)
 # age hooks the parser (must be last; it intercepts Cypher syntax)
-RUN echo "shared_preload_libraries = 'pg_cron,timescaledb,age'" \
-        >> /usr/share/postgresql/postgresql.conf.sample
+RUN { \
+        echo "shared_preload_libraries = 'pg_cron,timescaledb,age'"; \
+        echo "cron.database_name = 'hermes_cron'"; \
+    } >> /usr/share/postgresql/postgresql.conf.sample
+RUN grep -E "^(shared_preload_libraries|cron.database_name)" /usr/share/postgresql/postgresql.conf.sample
 
-# ---- Tuned config (replaces postgresql.conf) ----
-COPY postgresql.conf /etc/postgresql/postgresql.conf
+# ---- hermes-init.sh: one-shot installer for extensions + schemas ----
+# The script + bundled SQL are the only path that touches the template DB.
+# initdb.d/ is intentionally empty (or absent) so the entrypoint doesn't
+# replay anything at first boot.
+COPY --chown=root:root bin/hermes-init.sh /usr/local/bin/hermes-init.sh
+COPY --chown=root:root bin/hermes-cron.sh /usr/local/bin/hermes-cron.sh
+COPY --chown=root:root bin/01-schemas.sql /usr/local/share/hermes/01-schemas.sql
+RUN chmod 0755 /usr/local/bin/hermes-init.sh /usr/local/bin/hermes-cron.sh /usr/local/share/hermes/01-schemas.sql
 
-# ---- Bootstrap SQL ----
-# 00-extensions.sql: every new DB gets the 6 extensions installed.
-# 01-template.sql:    only the hermes_template DB gets the 5 schemas baked in.
-COPY initdb.d/ /docker-entrypoint-initdb.d/
+# ---- postgresql.conf tuning (merged into the image's conf at build) ----
+# The pgvector image's entrypoint copies postgresql.conf.sample to the
+# data dir on first init, so appending to .sample here makes the tunables
+# survive container rebuilds.
+RUN { \
+        echo ""; \
+        echo "# ---- Hermes tunables ----"; \
+        echo "max_connections = 200"; \
+        echo "shared_buffers = 512MB"; \
+        echo "effective_cache_size = 1GB"; \
+        echo "work_mem = 8MB"; \
+        echo "maintenance_work_mem = 128MB"; \
+        echo "wal_compression = on"; \
+        echo "logging_collector = on"; \
+        echo "log_destination = 'stderr'"; \
+        echo "log_min_duration_statement = 250ms"; \
+        echo "log_line_prefix = '%m [%p] %q%u@%d from %h '"; \
+        echo "lc_messages = 'C.UTF-8'"; \
+        echo "lc_monetary = 'C.UTF-8'"; \
+        echo "lc_numeric = 'C.UTF-8'"; \
+        echo "lc_time = 'C.UTF-8'"; \
+        echo "timescaledb.telemetry_level = off"; \
+    } >> /usr/share/postgresql/postgresql.conf.sample
 
-# ---- AOT-published binary: the hermes-memory CLI (built in CI) ----
-COPY --from=ghcr.io/skb50bd/hermes-memory-binary:0.1.0 \
-     /hermes-memory /usr/local/bin/hermes-memory
+# ---- hermes-memory CLI (not bundled in the image; install separately) ----
+# The CLI is a NativeAOT-published single binary, ~30MB, that talks to this
+# Postgres over HERMES_PG_CONN_STR. Install it from the GitHub release:
+#   curl -L https://github.com/skb50bd/hermes-memory/releases/latest/download/hermes-memory-linux-x64.tar.gz | tar -xz
+#   sudo mv hermes-memory /usr/local/bin/
+# Keeping the binary OUT of the Postgres image means: smaller image, no
+# build dependency on .NET 10, binary updates don't require image rebuild.
 
 # Healthcheck: pg_isready + extension list
 HEALTHCHECK --interval=5s --timeout=5s --retries=20 \

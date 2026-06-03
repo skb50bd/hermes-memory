@@ -1,5 +1,6 @@
 # Build output
 bin/
+!docker/postgres/bin/
 obj/
 out/
 publish/

@@ -1,31 +1,11 @@
-#!/bin/bash
-#
-# 01-template-bootstrap.sh
-#
-# Runs on first cluster init AND on every CREATE DATABASE done after
-# (because the postgres entrypoint replays /docker-entrypoint-initdb.d
-# for any database that didn't exist at cluster init time).
-#
-# We gate on POSTGRES_DB: only run the schema bootstrap when we're
-# initializing the `hermes_template` database. New profile DBs cloned
-# from this template via `CREATE DATABASE ... TEMPLATE hermes_template`
-# inherit the schemas byte-perfect and don't need the bootstrap rerun.
+-- 01-schemas.sql
+-- Idempotent. Creates the 5 schemas that the hermes-memory platform uses.
+-- Run once against `hermes_template` AFTER 00-extensions.sql:
+--   psql -U postgres -d hermes_template -f 01-schemas.sql
+-- The result is a self-contained template DB. Every profile DB created
+-- from it via `hermes-memory profile create <name>` is a byte-perfect
+-- clone and needs no further setup.
 
-set -e
-
-# This env var is exported by the postgres entrypoint based on
-# `POSTGRES_DB` (or the default `postgres`).
-TARGET_DB="${POSTGRES_DB:-postgres}"
-
-if [ "$TARGET_DB" != "hermes_template" ]; then
-    echo "[01-template-bootstrap] Skipping: POSTGRES_DB=$TARGET_DB is not hermes_template"
-    exit 0
-fi
-
-echo "[01-template-bootstrap] Bootstrapping hermes_template with 5 schemas..."
-
-# Run the schema file against the template DB
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "hermes_template" <<'SQL'
 -- =====================================================================
 -- 1. agent_memory
 -- =====================================================================
@@ -149,9 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_messages_tsv     ON hermes_journal.messag
 CREATE TABLE IF NOT EXISTS hermes_journal.messages_default PARTITION OF hermes_journal.messages DEFAULT;
 
 CREATE OR REPLACE FUNCTION hermes_journal.ensure_monthly_partition(p_year int, p_month int)
-RETURNS void
-LANGUAGE plpgsql
-AS $$
+RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
     partition_name text;
     start_date     date;
@@ -168,8 +146,7 @@ END;
 $$;
 
 DO $$
-DECLARE
-    d date;
+DECLARE d date;
 BEGIN
     FOR d IN
         SELECT (current_date + (n || ' months')::interval)::date
@@ -216,6 +193,11 @@ CREATE INDEX IF NOT EXISTS idx_skill_links_target ON hermes_skills.skill_links (
 -- =====================================================================
 -- 5. hermes_metrics (timescaledb hypertable)
 -- =====================================================================
+-- TimescaleDB 2.x (since mid-2024) is AGPL-licensed. The "apache" tier
+-- includes hypertables and basic queries. Compression, retention policies,
+-- and continuous aggregates are PAID features ("timescale" tier).
+-- So: keep the hypertable (free) and let application code handle
+-- retention/aggregation. No add_compression_policy / add_retention_policy.
 CREATE SCHEMA IF NOT EXISTS hermes_metrics;
 
 CREATE TABLE IF NOT EXISTS hermes_metrics.events (
@@ -230,14 +212,8 @@ SELECT create_hypertable('hermes_metrics.events', 'ts',
     chunk_time_interval => INTERVAL '7 days',
     if_not_exists => TRUE);
 
-ALTER TABLE hermes_metrics.events SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'profile,metric_name',
-    timescaledb.compress_orderby   = 'ts DESC'
-);
-
-SELECT add_compression_policy('hermes_metrics.events', INTERVAL '30 days');
-SELECT add_retention_policy('hermes_metrics.events', INTERVAL '90 days');
+-- Drop the metrics table after 1 year via a pg_cron job (free).
+-- App code is responsible for querying with time_bucket() and aggregations.
 
 -- =====================================================================
 -- 6. public.schema_migrations
@@ -251,18 +227,17 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
 -- =====================================================================
 -- 7. pg_cron jobs
 -- =====================================================================
-SELECT cron.schedule(
-    'hermes_journal_ensure_partitions',
-    '0 0 25 * *',
-    $$SELECT hermes_journal.ensure_monthly_partition(
-        extract(year  from (current_date + interval '1 month'))::int,
-        extract(month from (current_date + interval '1 month'))::int
-      );
-      SELECT hermes_journal.ensure_monthly_partition(
-        extract(year  from (current_date + interval '2 month'))::int,
-        extract(month from (current_date + interval '2 month'))::int
-      );$$
-);
-SQL
-
-echo "[01-template-bootstrap] Done."
+-- pg_cron is configured (via postgresql.conf) to read jobs from
+-- `hermes_template`. BUT — `hermes_template` must be clonable, and
+-- `CREATE DATABASE ... TEMPLATE` refuses if the source has active
+-- connections. pg_cron + TimescaleDB each keep one idle session pinned
+-- to cron.database_name, which blocks the clone.
+--
+-- Workaround: don't keep ANY user-database pin in hermes_template. Move
+-- the cron jobs to a dedicated `hermes_cron` database that's NOT cloned.
+-- Profile DBs are clones of `hermes_template` (clean, no active sessions).
+-- `hermes_cron` is created once by the bootstrap, never cloned.
+-- ---------------------------------------------------------------------
+-- We DON'T schedule the jobs here. They get scheduled by hermes-cron.sh
+-- in a follow-up step that connects to `hermes_cron` (the one DB the
+-- workers can safely idle in).

@@ -51,46 +51,54 @@ They share the connection pool and the embedder cache.
 ## Quickstart
 
 ```bash
-# 1. Pull the image (or build locally)
+# 1. Pull the image (or build locally — see docker/README.md)
 docker pull ghcr.io/skb50bd/hermes-postgres:18
 
-# 2. Start Postgres (creates hermes_template with all 5 schemas)
+# 2. Start Postgres (clean cluster, no automatic init)
 docker run -d --name hermes-pg \
     -e POSTGRES_PASSWORD=*** \
-    -e POSTGRES_DB=hermes_template \
+    -e POSTGRES_USER=postgres \
     -p 5432:5432 \
+    -v pgdata:/var/lib/postgresql/data \
     ghcr.io/skb50bd/hermes-postgres:18
 
-# 3. Create a per-agent database
-hermes-memory profile create work
-hermes-memory profile create personal
-hermes-memory profile list
+# 3. Initialize: creates hermes_template (5 schemas, 6 extensions) +
+#    hermes_cron (pg_cron with 2 jobs).
+docker exec hermes-pg /usr/local/bin/hermes-init.sh
 
-# 4. Preflight
+# 4. Create a per-agent database (byte-perfect clone of hermes_template)
+docker exec hermes-pg psql -U postgres -c "CREATE DATABASE hermes_work TEMPLATE hermes_template CONNECTION LIMIT 20"
+
+# 5. Connect and use
 export HERMES_PG_CONN_STR='postgresql://postgres:***@localhost:5432/hermes_work'
-hermes-memory preflight
-# 16/16 passed
-
-# 5. Run as MCP server (the agent spawns this)
-hermes-memory --mcp
+psql -c "SELECT count(*) FROM pg_extension;"      # 7 (6 + plpgsql)
+psql -c "SELECT schemaname, count(*) FROM pg_tables
+         WHERE schemaname LIKE 'hermes_%' OR schemaname='agent_memory'
+         GROUP BY schemaname;"
 ```
 
-## Build (from source)
+## Architecture
 
-```bash
-git clone https://github.com/skb50bd/hermes-memory.git
-cd hermes-memory
-
-# Build the Postgres image
-docker build -t ghcr.io/skb50bd/hermes-postgres:dev -f docker/postgres/Dockerfile docker/postgres/
-
-# Build the AOT binary
-dotnet publish src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj \
-    -c Release -r linux-x64 \
-    -p:PublishAot=true \
-    -p:PublishSingleFile=true \
-    -o ./out/linux-x64
-./out/linux-x64/hermes-memory version
+```
+┌─────────────────────┐  HERMES_PG_CONN_STR  ┌──────────────────────────┐
+│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 6 exts    │
+│  (NativeAOT binary) │                      │  ┌──────────────────┐    │
+│                     │                      │  │ hermes_template  │    │
+│  --mcp   (stdio)    │                      │  │ (5 schemas,      │    │
+│  preflight          │                      │  │  6 extensions)   │    │
+│  migrate            │                      │  └────────┬─────────┘    │
+│  profile create     │                      │           │ clone        │
+│  embed              │                      │  ┌────────▼─────────┐    │
+│  version            │                      │  │ hermes_work      │    │
+└─────────────────────┘                      │  │ hermes_personal  │    │
+                                             │  │ hermes_default   │    │
+                                             │  └──────────────────┘    │
+                                             │  ┌──────────────────┐    │
+                                             │  │ hermes_cron      │    │
+                                             │  │ (pg_cron + jobs) │    │
+                                             │  └──────────────────┘    │
+                                             └──────────────────────────┘
+```
 ```
 
 ## Embedders
