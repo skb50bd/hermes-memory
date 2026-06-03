@@ -1,0 +1,77 @@
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build + publish linux-x64
+        run: |
+          mkdir -p out
+          dotnet publish src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj \
+            -c Release -r linux-x64 \
+            -p:PublishAot=true \
+            -p:PublishSingleFile=true \
+            -p:Version=${GITHUB_REF_NAME#v} \
+            -p:SourceRevisionId=${GITHUB_SHA::7} \
+            -o out/hermes-memory-linux-x64
+          strip out/hermes-memory-linux-x64/hermes-memory
+          ls -lh out/hermes-memory-linux-x64/hermes-memory
+          tar -C out/hermes-memory-linux-x64 -czf out/hermes-memory-linux-x64.tar.gz hermes-memory
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-memory-linux-x64
+          path: out/hermes-memory-linux-x64.tar.gz
+
+  build-arm64:
+    runs-on: ubuntu-22.04-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build + publish linux-arm64
+        run: |
+          mkdir -p out
+          dotnet publish src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj \
+            -c Release -r linux-arm64 \
+            -p:PublishAot=true \
+            -p:PublishSingleFile=true \
+            -p:Version=${GITHUB_REF_NAME#v} \
+            -p:SourceRevisionId=${GITHUB_SHA::7} \
+            -o out/hermes-memory-linux-arm64
+          strip out/hermes-memory-linux-arm64/hermes-memory
+          tar -C out/hermes-memory-linux-arm64 -czf out/hermes-memory-linux-arm64.tar.gz hermes-memory
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-memory-linux-arm64
+          path: out/hermes-memory-linux-arm64.tar.gz
+
+  publish:
+    needs: [build-x64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/hermes-memory-linux-x64/hermes-memory-linux-x64.tar.gz
+            artifacts/hermes-memory-linux-arm64/hermes-memory-linux-arm64.tar.gz
+          generate_release_notes: true

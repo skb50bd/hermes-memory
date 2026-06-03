@@ -1,0 +1,38 @@
+# Multi-stage build that produces a single statically-linked AOT binary
+# suitable for copying into the Postgres Docker image (and for general
+# distribution on linux-x64 / linux-arm64).
+#
+#   docker build -f Dockerfile.publish -t hermes-memory-binary:0.1.0 .
+#
+# Output binary at /hermes-memory.
+
+# ---- Build stage ----
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+ARG VERSION=0.1.0
+ARG COMMIT=dev
+WORKDIR /src
+
+# Restore (cached layer)
+COPY Hermes.Memory.sln ./
+COPY Directory.Build.props Directory.Packages.props global.json ./
+COPY src/Hermes.Memory.Core/Hermes.Memory.Core.csproj src/Hermes.Memory.Core/
+COPY src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj src/Hermes.Memory.Cli/
+RUN dotnet restore Hermes.Memory.sln
+
+# Build + Publish
+COPY src/ src/
+RUN dotnet publish src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj \
+        -c Release \
+        -r linux-x64 \
+        --self-contained \
+        -p:PublishAot=true \
+        -p:PublishSingleFile=true \
+        -p:Version=${VERSION} \
+        -p:SourceRevisionId=${COMMIT} \
+        -o /publish
+
+# ---- Runtime stage ----
+# Final image is just the binary; no runtime, no shell, no nothing.
+FROM scratch
+COPY --from=build /publish/hermes-memory /hermes-memory
+ENTRYPOINT ["/hermes-memory"]

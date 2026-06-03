@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Core lib doesn't ship as Exe; AOT happens on the Cli project. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="System.Net.Http.Json" />
+  </ItemGroup>
+
+  <!-- AOT source-gen: register all DTOs once. Every new record added to
+       Models/ must be added here too, or trim will drop it. -->
+  <ItemGroup>
+    <CompilerVisibleProperty Include="JsonSerializerContext" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Trimming/AOT annotations live here -->
+    <RootDescriptor Include="NativeAot.Trim.xml" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <assembly fullname="Npgsql" preserve="all" />
+  <assembly fullname="ModelContextProtocol" preserve="all" />
+  <assembly fullname="System.Net.Http.Json" preserve="all" />
+  <assembly fullname="Microsoft.Extensions.Hosting" preserve="all" />
+  <assembly fullname="Microsoft.Extensions.Configuration" preserve="all" />
+  <assembly fullname="Microsoft.Extensions.DependencyInjection" preserve="all" />
+  <assembly fullname="Microsoft.Extensions.Logging" preserve="all" />
+  <assembly fullname="Microsoft.Extensions.Options" preserve="all" />
+
+  <!-- Dynamic dependencies Npgsql may need at runtime -->
+  <assembly fullname="System.Collections.Concurrent" preserve="all" />
+  <assembly fullname="System.Diagnostics.DiagnosticSource" preserve="all" />
+  <assembly fullname="System.Diagnostics.Tracing" preserve="all" />
+  <assembly fullname="System.Formats.Asn1" preserve="all" />
+  <assembly fullname="System.Net.Security" preserve="all" />
+  <assembly fullname="System.Private.Uri" preserve="all" />
+  <assembly fullname="System.Text.Encodings.Web" preserve="all" />
+  <assembly fullname="System.Text.Json" preserve="all" />
+  <assembly fullname="System.Threading.Channels" preserve="all" />
+  <assembly fullname="System.Threading.RateLimiting" preserve="all" />
+</linker>

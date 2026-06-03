@@ -1,0 +1,33 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Core runtime -->
+    <PackageVersion Include="Npgsql" Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="9.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="9.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="9.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.7" />
+
+    <!-- MCP -->
+    <PackageVersion Include="ModelContextProtocol" Version="0.2.0-preview.2" />
+
+    <!-- Embeddings HTTP -->
+    <PackageVersion Include="System.Net.Http.Json" Version="9.0.7" />
+
+    <!-- JSON AOT source-gen (System.Text.Json ships with the runtime) -->
+
+    <!-- Testcontainers for integration tests -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.2" />
+
+    <!-- Verify-style snapshot tests for migration outputs -->
+    <PackageVersion Include="Verify" Version="28.16.0" />
+    <PackageVersion Include="Verify.Xunit" Version="28.16.0" />
+  </ItemGroup>
+</Project>
