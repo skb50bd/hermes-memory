@@ -43,14 +43,14 @@ if [[ "${1:-}" == "--dry-run" || "${HERMES_DRY_RUN:-0}" == "1" ]]; then
     DRY_RUN=1
 fi
 
-log()  { printf '\033[1;34m[hermes-bootstrap]\033[0m %s\n' "$*"; }
+log()  { printf '\033[1;34m[hermes-bootstrap]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[hermes-bootstrap]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[hermes-bootstrap]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # Wrapper that respects --dry-run
 pg_exec() {
     if [[ "${DRY_RUN}" == "1" ]]; then
-        echo "  [dry-run] docker exec -i ${PG_CONTAINER} psql -U ${PG_USER} $*"
+        echo "  [dry-run] docker exec -i ${PG_CONTAINER} psql -U ${PG_USER} $*" >&2
     else
         docker exec -i "${PG_CONTAINER}" psql -U "${PG_USER}" "$@"
     fi
@@ -107,8 +107,9 @@ create_profile_db() {
     local profile="$1"
     local db_name="hermes_${profile}"
     log "creating per-profile database '${db_name}' (clone of ${TEMPLATE_DB})"
-    pg_exec -d postgres -c "DROP DATABASE IF EXISTS ${db_name}" >/dev/null
-    pg_exec -d postgres -c "CREATE DATABASE ${db_name} TEMPLATE ${TEMPLATE_DB} CONNECTION LIMIT 20" \
+    # All psql chatter goes to stderr so the only thing on stdout is ${db_name}.
+    pg_exec -d postgres -c "DROP DATABASE IF EXISTS ${db_name}" >/dev/null 2>&1
+    pg_exec -d postgres -c "CREATE DATABASE ${db_name} TEMPLATE ${TEMPLATE_DB} CONNECTION LIMIT 20" >/dev/null 2>&1 \
         || die "failed to clone ${TEMPLATE_DB} → ${db_name}"
     echo "${db_name}"
 }
