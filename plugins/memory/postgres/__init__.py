@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -104,13 +105,46 @@ def _normalize_pg_mem_dsn(dsn: str) -> str:
     return make_dsn(**kwargs)
 
 
+def _load_pg_mem_dsn_from_env_file() -> str:
+    """Last-resort fallback: parse ~/.hermes/.env line-by-line for
+    PG_MEM_DB_CONN_STR=... (ignores quoting, comments, blank lines).
+    The error message from get_pg_mem_db_conn_str() tells users to
+    'set it in ~/.hermes/.env' — so the function had better actually
+    read that file when the env var isn't set.
+    """
+    env_path = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / ".env"
+    if not env_path.exists():
+        return ""
+    try:
+        for raw in env_path.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() != "PG_MEM_DB_CONN_STR":
+                continue
+            # Strip surrounding quotes if present.
+            value = value.strip()
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            return value
+    except OSError:
+        return ""
+    return ""
+
+
 def get_pg_mem_db_conn_str() -> str:
     dsn = os.environ.get("PG_MEM_DB_CONN_STR", "").strip()
+    if not dsn:
+        dsn = _load_pg_mem_dsn_from_env_file().strip()
     if dsn:
         return _normalize_pg_mem_dsn(dsn)
     raise RuntimeError(
         "No postgres connection configured. Set PG_MEM_DB_CONN_STR in "
-        "~/.hermes/.env, e.g. "
+        "~/.hermes/.env (or export it in your shell), e.g. "
         "PG_MEM_DB_CONN_STR='postgresql://hermes:***@10.0.0.1:5432/hermes'"
     )
 
