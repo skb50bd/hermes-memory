@@ -53,7 +53,7 @@ jobs:
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
         with:
-          context: docker/postgres
+          context: .
           file: docker/postgres/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
@@ -80,7 +80,7 @@ jobs:
 
       - name: Build ephemeral test image
         run: |
-          docker build -t hermes-postgres:smoke -f docker/postgres/Dockerfile docker/postgres
+          docker build -t hermes-postgres:smoke -f docker/postgres/Dockerfile .
 
       - name: Start container
         run: |

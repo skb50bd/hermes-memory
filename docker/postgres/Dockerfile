@@ -90,9 +90,10 @@ RUN grep -E "^(shared_preload_libraries|cron.database_name)" /usr/share/postgres
 # The script + bundled SQL are the only path that touches the template DB.
 # initdb.d/ is intentionally empty (or absent) so the entrypoint doesn't
 # replay anything at first boot.
-COPY --chown=root:root bin/hermes-init.sh /usr/local/bin/hermes-init.sh
-COPY --chown=root:root bin/hermes-cron.sh /usr/local/bin/hermes-cron.sh
-COPY --chown=root:root bin/01-schemas.sql /usr/local/share/hermes/01-schemas.sql
+COPY --chown=root:root docker/postgres/bin/hermes-init.sh /usr/local/bin/hermes-init.sh
+COPY --chown=root:root docker/postgres/bin/hermes-cron.sh /usr/local/bin/hermes-cron.sh
+COPY --chown=root:root docker/postgres/bin/01-schemas.sql /usr/local/share/hermes/01-schemas.sql
+COPY --chown=root:root migrations /usr/migrations
 RUN chmod 0755 /usr/local/bin/hermes-init.sh /usr/local/bin/hermes-cron.sh /usr/local/share/hermes/01-schemas.sql
 
 # ---- postgresql.conf tuning (merged into the image's conf at build) ----
