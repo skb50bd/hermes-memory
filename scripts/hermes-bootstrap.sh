@@ -92,22 +92,13 @@ if [[ "${exists}" != "1" ]]; then
     pg_exec -d postgres -c "CREATE DATABASE ${TEMPLATE_DB}" >/dev/null
 fi
 
-log "copying migrations into container"
+log "applying schema to ${TEMPLATE_DB} (using migrations bundled in image at /usr/migrations)"
 if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "  [dry-run] docker cp ${REPO_ROOT}/migrations ${PG_CONTAINER}:/tmp/hermes-mem-migrations"
-    echo "  [dry-run] docker cp ${REPO_ROOT}/docker/postgres/bin/01-schemas.sql ${PG_CONTAINER}:/tmp/01-schemas.sql"
+    echo "  [dry-run] docker exec -i ${PG_CONTAINER} psql -U ${PG_USER} -d ${TEMPLATE_DB} -v ON_ERROR_STOP=1 -f /usr/local/share/hermes/01-schemas.sql"
 else
-    docker cp "${REPO_ROOT}/migrations" "${PG_CONTAINER}:/tmp/hermes-mem-migrations"
-    docker cp "${REPO_ROOT}/docker/postgres/bin/01-schemas.sql" "${PG_CONTAINER}:/tmp/01-schemas.sql"
-fi
-
-log "applying schema to ${TEMPLATE_DB}"
-if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "  [dry-run] psql -U ${PG_USER} -d ${TEMPLATE_DB} -f /tmp/01-schemas.sql"
-else
-    docker exec -w /tmp/hermes-mem-migrations -i "${PG_CONTAINER}" \
+    docker exec -i "${PG_CONTAINER}" \
         psql -U "${PG_USER}" -d "${TEMPLATE_DB}" -v ON_ERROR_STOP=1 \
-        -f /tmp/01-schemas.sql \
+        -f /usr/local/share/hermes/01-schemas.sql \
         || die "schema apply failed — see output above"
 fi
 
@@ -135,7 +126,7 @@ write_profile_env() {
     fi
     mkdir -p "$(dirname "${env_file}")"
     if [[ -f "${env_file}" ]] && grep -q "^PG_MEM_DB_CONN_STR=" "${env_file}"; then
-        sed -i "s|^PG_MEM_DB_CONN_STR=.*|${line}|" "${env_file}"
+        sed -i "s#^PG_MEM_DB_CONN_STR=.*#${line}#" "${env_file}"
     else
         printf '\n%s\n' "${line}" >> "${env_file}"
     fi
