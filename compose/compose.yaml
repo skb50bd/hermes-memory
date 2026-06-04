@@ -1,15 +1,25 @@
 # Compose file for the Hermes Agent platform.
-# Drop this in ~/infra/ to replace compose.db.yaml.
+#
+# Deploys a single Postgres 18 instance (the hermes-postgres image built
+# in CI and published to GHCR) with all 6 extensions preinstalled and
+# the hermes-init.sh script bundled for first-boot schema setup.
+#
+# Usage:
+#   cd ~/repos/hermes-memory
+#   docker compose -f compose/compose.yaml up -d
+#   ./scripts/hermes-bootstrap.sh         # creates hermes_template + per-profile DBs
+#
+# Override via .env (or environment):
+#   HERMES_PG_USER=hermes                 # postgres role (default: hermes)
+#   HERMES_PG_PASSWORD=***           # role password (default: changeme)
+#   HERMES_TEMPLATE_DB=hermes_template     # template DB name
+#   HERMES_POSTGRES_IMAGE=ghcr.io/skb50bd/hermes-memory/hermes-postgres:18
 
 name: hermes-memory
 
 services:
   postgres:
-    # Build locally until GHCR is published
-    build:
-      context: ../docker/postgres
-      dockerfile: Dockerfile
-    image: ghcr.io/skb50bd/hermes-postgres:18
+    image: ${HERMES_POSTGRES_IMAGE:-ghcr.io/skb50bd/hermes-memory/hermes-postgres:18}
     container_name: hermes-postgres
     mem_limit: 2g
     cpus: "2.00"
@@ -20,7 +30,7 @@ services:
       POSTGRES_USER: ${HERMES_PG_USER:-hermes}
       POSTGRES_PASSWORD: ${HERMES_PG_PASSWORD:-changeme}
     ports:
-      - "5432:5432"
+      - "${HERMES_PG_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -31,14 +41,14 @@ services:
       timeout: 5s
       retries: 20
     networks:
-      database: {}
+      hermes: {}
 
 volumes:
   postgres-data:
     name: hermes-postgres-data
 
 networks:
-  database:
-    name: database
+  hermes:
+    name: hermes
     driver: bridge
     attachable: true
