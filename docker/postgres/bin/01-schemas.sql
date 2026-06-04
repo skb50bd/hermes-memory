@@ -38,3 +38,8 @@ CREATE TABLE IF NOT EXISTS public.schema_migrations (
 -- We DON'T schedule the jobs here. They get scheduled by hermes-cron.sh
 -- in a follow-up step that connects to `hermes_cron` (the one DB the
 -- workers can safely idle in).
+
+-- Unique constraint for idempotent RememberAsync
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_content_source
+    ON agent_memory.memories (md5(content), COALESCE(source, ''))
+    WHERE deleted_at IS NULL;

@@ -55,7 +55,8 @@ public sealed class MemoryRepository
         cmd.Parameters.AddWithValue("v1536",  (object?)(dim == 1536 ? vec : null) ?? DBNull.Value);
         cmd.Parameters.Add(new NpgsqlParameter("tags", NpgsqlDbType.Array | NpgsqlDbType.Text)
             { Value = (object?)tags ?? Array.Empty<string>() });
-        cmd.Parameters.AddWithValue("category", (object?)category ?? DBNull.Value);
+        cmd.Parameters.Add(new NpgsqlParameter("category", NpgsqlDbType.Unknown)
+            { Value = (object?)category ?? DBNull.Value });
         cmd.Parameters.AddWithValue("source",   (object?)source   ?? DBNull.Value);
         cmd.Parameters.AddWithValue("metadata", metadata?.GetRawText() ?? "{}");
         var result = await cmd.ExecuteScalarAsync(ct);
@@ -93,7 +94,7 @@ public sealed class MemoryRepository
 
         var sql = $"""
             WITH fts_candidates AS (
-                SELECT id, content, tags, category, created_at, source,
+                SELECT id, content, tags, category, created_at, source, {dimColumn},
                        ts_rank_cd(content_tsv, websearch_to_tsquery('english', @q)) AS text_rank
                 FROM agent_memory.memories
                 WHERE deleted_at IS NULL
@@ -102,9 +103,15 @@ public sealed class MemoryRepository
                 LIMIT 200
             )
             SELECT id, content, tags, category, created_at, source, text_rank,
-                   1 - ({dimColumn} <=> @qvec) AS vector_sim
+                   CASE WHEN 1 - ({dimColumn} <=> @qvec::vector) = 'NaN'::real
+                        THEN 0
+                        ELSE 1 - ({dimColumn} <=> @qvec::vector)
+                   END AS vector_sim
             FROM fts_candidates
-            ORDER BY (@w * text_rank + (1 - @w) * (1 - ({dimColumn} <=> @qvec))) DESC
+            ORDER BY (@w * text_rank + (1 - @w) * CASE WHEN 1 - ({dimColumn} <=> @qvec::vector) = 'NaN'::real
+                                                        THEN 0
+                                                        ELSE 1 - ({dimColumn} <=> @qvec::vector)
+                                                   END) DESC
             LIMIT @k
             """;
 

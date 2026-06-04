@@ -9,15 +9,6 @@ using Xunit;
 
 namespace Hermes.Memory.Integration;
 
-/// <summary>
-/// Integration test that hits a real Postgres container with the 6
-/// extensions installed. Verifies the full stack: connection pool,
-/// embedder (noop provider for determinism), repository, FTS + vector
-/// search, and the migration runner.
-///
-/// To run: requires Docker. The test starts a Testcontainers instance,
-/// applies the migrations, and runs the assertions.
-/// </summary>
 public sealed class MemoryRepositoryTests : IAsyncLifetime
 {
     private readonly PostgreSqlBuilder _builder = new PostgreSqlBuilder()
@@ -27,31 +18,57 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
         .WithPassword("test")
         .WithCleanUp(true);
 
+    private PostgreSqlContainer? _container;
     private NpgsqlDataSource _ds = null!;
     private HermesDataSource _hermes = null!;
     private MemoryRepository _repo = null!;
     private EmbedderRegistry _embedders = null!;
 
+    private static string FindSchemaFile()
+    {
+        var paths = new[]
+        {
+            "../../../../docker/postgres/bin/01-schemas.sql",
+            "../../../docker/postgres/bin/01-schemas.sql",
+            "../../docker/postgres/bin/01-schemas.sql",
+            "../docker/postgres/bin/01-schemas.sql",
+            "docker/postgres/bin/01-schemas.sql",
+            "/home/pixu/repos/hermes-memory/docker/postgres/bin/01-schemas.sql",
+        };
+        foreach (var p in paths)
+        {
+            if (File.Exists(p)) return p;
+        }
+        throw new FileNotFoundException("Could not find 01-schemas.sql");
+    }
+
     public async Task InitializeAsync()
     {
-        var container = _builder.Build();
-        var raw = container.GetConnectionString();
-        _ds = new NpgsqlDataSourceBuilder(raw).Build();
-
-        // Apply the 5-schema bootstrap directly (skipping the gate script
-        // since we're a real test, not a docker init).
-        var bootstrapSql = File.ReadAllText("../../../../docker/postgres/initdb.d/01-template-bootstrap.sh");
-        // Strip the psql wrapper — we want just the SQL.
-        var sql = ExtractSqlBlock(bootstrapSql);
-
-        await using (var cmd = new NpgsqlCommand(sql, _ds.CreateConnection()))
-        await using (var conn = cmd.Connection!)
+        string raw;
+        var envConn = Environment.GetEnvironmentVariable("HERMES_PG_CONN_STR");
+        if (!string.IsNullOrWhiteSpace(envConn))
         {
-            await conn.OpenAsync();
-            await cmd.ExecuteNonQueryAsync();
+            raw = envConn;
+        }
+        else
+        {
+            _container = _builder.Build();
+            await _container.StartAsync();
+            raw = _container.GetConnectionString();
+
+            var schemaPath = FindSchemaFile();
+            var sql = File.ReadAllText(schemaPath);
+            await using (var conn = new NpgsqlConnection(raw))
+            {
+                await conn.OpenAsync();
+                await using (var cmd = new NpgsqlCommand(sql, conn))
+                {
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
         }
 
-        // Configure noop embedder (deterministic, no network).
+        _ds = new NpgsqlDataSourceBuilder(raw).Build();
         _hermes = new HermesDataSource(raw, NullLogger<HermesDataSource>.Instance);
         _embedders = new EmbedderRegistry(NullLogger<EmbedderRegistry>.Instance,
             (dim, provider, model, _, _) => Task.FromResult(new HermesEmbedder(
@@ -67,19 +84,24 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
     {
         await _hermes.DisposeAsync();
         await _ds.DisposeAsync();
+        if (_container != null)
+        {
+            await _container.DisposeAsync();
+        }
     }
 
     [Fact]
     public async Task Remember_Then_Search_Finds_It()
     {
+        var unique = Guid.NewGuid().ToString("N")[..8];
         var id = await _repo.RememberAsync(
-            content: "User prefers Postgres over MySQL for new projects",
+            content: $"User prefers Postgres over MySQL for new projects ({unique})",
             tags: new[] { "preferences", "databases" },
             category: "preferences",
             source: "test");
         Assert.True(id > 0);
 
-        var hits = await _repo.SearchAsync("Postgres preferences", topK: 5);
+        var hits = await _repo.SearchAsync($"Postgres MySQL projects {unique}", topK: 5);
         Assert.NotEmpty(hits);
         Assert.Contains(hits, h => h.Id == id);
     }
@@ -87,18 +109,20 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
     [Fact]
     public async Task Forget_Sets_DeletedAt_And_Excludes_From_Search()
     {
-        var id = await _repo.RememberAsync("delete me", tags: new[] { "ephemeral" });
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var id = await _repo.RememberAsync($"delete me ephemeral test content ({unique})", tags: new[] { "ephemeral" });
         Assert.True(id > 0);
         Assert.True(await _repo.ForgetAsync(id));
-        var hits = await _repo.SearchAsync("delete me", topK: 5);
+        var hits = await _repo.SearchAsync($"delete me ephemeral {unique}", topK: 5);
         Assert.DoesNotContain(hits, h => h.Id == id);
     }
 
     [Fact]
     public async Task Duplicate_Remember_Returns_Zero()
     {
-        var id1 = await _repo.RememberAsync("unique content xyz", source: "test");
-        var id2 = await _repo.RememberAsync("unique content xyz", source: "test");
+        var unique = $"unique content {Guid.NewGuid()}";
+        var id1 = await _repo.RememberAsync(unique, source: "test");
+        var id2 = await _repo.RememberAsync(unique, source: "test");
         Assert.NotEqual(0, id1);
         Assert.Equal(0, id2);
     }
@@ -106,18 +130,9 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
     [Fact]
     public async Task Stats_Reports_Live_Count()
     {
-        await _repo.RememberAsync("stats test memory", source: "test");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        await _repo.RememberAsync($"stats test memory ({unique})", source: "test");
         var stats = await _repo.GetStatsAsync();
         Assert.True(stats.Live >= 1);
-    }
-
-    private static string ExtractSqlBlock(string bashContent)
-    {
-        // The bootstrap script uses a here-doc with 'SQL' as the delimiter.
-        // Extract everything between the heredoc opener and closer.
-        var start = bashContent.IndexOf("<<'SQL'");
-        var end   = bashContent.LastIndexOf("SQL\n");
-        if (start < 0 || end < 0) throw new InvalidOperationException("Could not extract SQL from bootstrap script");
-        return bashContent[(start + "<<'SQL'".Length)..end];
     }
 }
