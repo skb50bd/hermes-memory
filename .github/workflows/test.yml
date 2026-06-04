@@ -50,5 +50,5 @@ jobs:
 
       - name: Run integration tests
         env:
-          HERMES_PG_CONN_STR: postgresql://postgres:test@localhost:5432/hermes_test
+          HERMES_PG_CONN_STR: Host=localhost;Port=5432;Username=postgres;Password=test;Database=hermes_test
         run: dotnet test tests/Hermes.Memory.Integration/Hermes.Memory.Integration.csproj -c Release --logger "console;verbosity=normal"
