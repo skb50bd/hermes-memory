@@ -30,6 +30,13 @@ jobs:
           dotnet restore Hermes.Memory.sln
           dotnet build Hermes.Memory.sln -c Release --no-restore
 
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "SELECT 1" && break
+            sleep 1
+          done
+
       - name: Install pg extensions
         run: |
           PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
