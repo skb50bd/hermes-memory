@@ -14,7 +14,7 @@ import pytest
 
 # Ensure the plugin is importable
 import sys
-sys.path.insert(0, "/home/pixu/repos/hermes-memory/plugins/kanban/postgres")
+sys.path.insert(0, "/home/pixu/.hermes/hermes-agent")
 
 from plugins.kanban.postgres import (
     create_task, claim_next, complete_task, get_task,
@@ -34,9 +34,11 @@ def db_conn():
 
 @pytest.fixture(autouse=True)
 def clean_tasks(db_conn):
-    """Remove test tasks before each test."""
+    """Remove all test tasks before each test."""
     with db_conn.cursor() as cur:
         cur.execute("DELETE FROM hermes_kanban.tasks WHERE title LIKE 'test-%'")
+        # Also reset any running tasks from previous failed tests
+        cur.execute("UPDATE hermes_kanban.tasks SET status = 'ready', worker_pid = NULL, current_run_id = NULL WHERE status = 'running'")
     db_conn.commit()
     yield
 
@@ -69,7 +71,7 @@ class TestKanbanClaim:
         # Run 10 workers concurrently
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(worker, i) for i in range(10)]
-            results = [f.result() for f in futures]
+            results = [f.result(timeout=30) for f in futures]
 
         # Collect all claimed IDs
         all_claimed = []
@@ -77,7 +79,7 @@ class TestKanbanClaim:
             all_claimed.extend(r)
 
         # No duplicates
-        assert len(all_claimed) == len(set(all_claimed)), "Duplicate claims detected!"
+        assert len(all_claimed) == len(set(all_claimed)), f"Duplicate claims detected! {all_claimed}"
         # All 5 tasks claimed
         assert set(all_claimed) == task_ids, f"Not all tasks claimed: {set(all_claimed)} vs {task_ids}"
 
