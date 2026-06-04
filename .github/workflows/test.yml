@@ -15,6 +15,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: hermes_test
+          POSTGRES_USER: postgres
         ports: ["5432:5432"]
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
