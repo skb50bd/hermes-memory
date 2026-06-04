@@ -258,7 +258,7 @@ def list_tenants() -> List[Dict[str, Any]]:
     with _cursor() as cur:
         _ensure_schema(cur)
         cur.execute(
-            f"SELECT id, slug, display_name, created_at "
+            f"SELECT id, slug, name, created_at "
             f"FROM {schema}.tenants ORDER BY slug"
         )
         return list(cur.fetchall())
@@ -269,12 +269,12 @@ def upsert_tenant(slug: str, display_name: Optional[str] = None) -> Dict[str, An
     with _cursor(commit=True) as cur:
         _ensure_schema(cur)
         cur.execute(
-            f"INSERT INTO {schema}.tenants (slug, display_name) "
+            f"INSERT INTO {schema}.tenants (slug, name) "
             f"VALUES (%s, %s) "
             f"ON CONFLICT (slug) DO UPDATE "
-            f"  SET display_name = COALESCE(EXCLUDED.display_name, {schema}.tenants.display_name) "
-            f"RETURNING id, slug, display_name, created_at",
-            (slug, display_name),
+            f"  SET name = COALESCE(EXCLUDED.name, {schema}.tenants.name) "
+            f"RETURNING id, slug, name, created_at",
+            (slug, display_name or slug),
         )
         return cur.fetchone()
 
@@ -315,7 +315,7 @@ def create_task(
                 tenant_id = row["id"]
             else:
                 cur.execute(
-                    f"INSERT INTO {schema}.tenants (slug, display_name) "
+                    f"INSERT INTO {schema}.tenants (slug, name) "
                     f"VALUES (%s, %s) RETURNING id",
                     (tenant, tenant),
                 )

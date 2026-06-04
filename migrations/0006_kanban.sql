@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS hermes_kanban.task_events (
     task_id    text NOT NULL REFERENCES hermes_kanban.tasks(id) ON DELETE CASCADE,
     run_id     bigint REFERENCES hermes_kanban.task_runs(id) ON DELETE SET NULL,
     kind       text NOT NULL,
+    actor      text,
     payload    jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
