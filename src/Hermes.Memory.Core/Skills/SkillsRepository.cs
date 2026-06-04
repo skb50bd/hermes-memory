@@ -1,5 +1,6 @@
 using Hermes.Memory.Core.Db;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace Hermes.Memory.Core.Skills;
 

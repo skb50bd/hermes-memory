@@ -177,6 +177,11 @@ public sealed class HermesEmbedder
         "kimi"         => "https://api.kimi.com/coding/v1",
         "ollama_local" => "http://localhost:11434",
         "openai"       => "https://api.openai.com/v1",
+        // "noop" is a test/local provider that returns zero vectors without
+        // hitting the network. It needs a non-null baseUrl only because the
+        // embedder HTTP code path dereferences it; an empty string is the
+        // cheapest sentinel that satisfies the type without a real endpoint.
+        "noop"         => string.Empty,
         _ => throw new NotSupportedException($"No default base URL for provider '{provider}'")
     };
 

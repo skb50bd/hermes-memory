@@ -1,4 +1,3 @@
-using System.CommandLine.Invocation;
 using Hermes.Memory.Core.Db;
 using Hermes.Memory.Core.Embeddings;
 using Hermes.Memory.Core.Journal;
@@ -22,7 +21,7 @@ namespace Hermes.Memory.Core.Mcp;
 /// </summary>
 public static class McpHost
 {
-    public static IHostBuilder ConfigureMcp(IHostBuilder builder) =>
+    public static IHostBuilder ConfigureMcp(this IHostBuilder builder) =>
         builder
             .ConfigureServices((ctx, services) =>
             {
@@ -74,18 +73,15 @@ public static class McpHost
     {
         // Run the host; the MCP SDK owns the stdio lifecycle.
         var host = Host.CreateDefaultBuilder(args)
-            .ConfigureMcp(_ => { })
+            .ConfigureMcp()
             .Build();
 
         // Initialize the embedder registry once at startup.
         var registry = host.Services.GetRequiredService<EmbedderRegistry>();
         var ds = host.Services.GetRequiredService<HermesDataSource>();
-        await registry.InitializeAsync(ds.Inner);
+        await registry.InitializeAsync(ds.Inner, default);
 
         await host.RunAsync();
         return 0;
     }
-
-    public static ICommandHandler RunHandler() =>
-        CommandHandler.Create<string[]>(RunAsync);
 }

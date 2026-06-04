@@ -37,7 +37,7 @@ public sealed class MetricsRepository
     {
         if (samples.Count == 0) return;
         await using var conn = await _ds.OpenConnectionAsync(ct);
-        await using var w = new NpgsqlBinaryImporter(conn,
+        await using var w = conn.BeginBinaryImport(
             "COPY hermes_metrics.events (ts, profile, metric_name, value, tags) FROM STDIN (FORMAT BINARY)");
         foreach (var s in samples)
         {

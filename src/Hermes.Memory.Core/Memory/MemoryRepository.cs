@@ -50,9 +50,9 @@ public sealed class MemoryRepository
             RETURNING id
             """, conn);
         cmd.Parameters.AddWithValue("content", content);
-        cmd.Parameters.AddWithValue("v768",   dim == 768  ? vec : null);
-        cmd.Parameters.AddWithValue("v1024",  dim == 1024 ? vec : null);
-        cmd.Parameters.AddWithValue("v1536",  dim == 1536 ? vec : null);
+        cmd.Parameters.AddWithValue("v768",   (object?)(dim == 768  ? vec : null) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("v1024",  (object?)(dim == 1024 ? vec : null) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("v1536",  (object?)(dim == 1536 ? vec : null) ?? DBNull.Value);
         cmd.Parameters.Add(new NpgsqlParameter("tags", NpgsqlDbType.Array | NpgsqlDbType.Text)
             { Value = (object?)tags ?? Array.Empty<string>() });
         cmd.Parameters.AddWithValue("category", (object?)category ?? DBNull.Value);

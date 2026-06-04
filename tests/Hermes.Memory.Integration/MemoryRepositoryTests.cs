@@ -34,8 +34,8 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _builder.BuildAsync();
-        var raw = _builder.ConnectionString;
+        var container = _builder.Build();
+        var raw = container.GetConnectionString();
         _ds = new NpgsqlDataSourceBuilder(raw).Build();
 
         // Apply the 5-schema bootstrap directly (skipping the gate script
@@ -58,7 +58,7 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
                 dim: dim, provider: provider, model: model, baseUrl: null, apiKey: null,
                 cacheDir: Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
                 failOpen: true, logger: NullLogger.Instance)));
-        await _embedders.InitializeAsync(_ds);
+        await _embedders.InitializeAsync(_ds, default);
 
         _repo = new MemoryRepository(_hermes, _embedders);
     }

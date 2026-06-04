@@ -65,8 +65,8 @@ public sealed class HermesDataSource : IAsyncDisposable
         builder.ConnectionStringBuilder.MinPoolSize = 0;
     }
 
-    public Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken ct = default)
-        => _dataSource.OpenConnectionAsync(ct);
+    public async ValueTask<NpgsqlConnection> OpenConnectionAsync(CancellationToken ct = default)
+        => await _dataSource.OpenConnectionAsync(ct);
 
     public async ValueTask DisposeAsync()
     {
