@@ -30,14 +30,12 @@ jobs:
           dotnet restore Hermes.Memory.sln
           dotnet build Hermes.Memory.sln -c Release --no-restore
 
-      - name: Install pg extensions (best-effort; integration test skips if unavailable)
+      - name: Install pg extensions
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-18-postgis-3 timescaledb-2-postgresql-18 || true
           PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
           PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
           PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS ltree;"
-          PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -f docker/postgres/bin/01-schemas.sql || true
+          PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -f docker/postgres/bin/01-schemas.sql
 
       - name: Run unit tests
         run: dotnet test tests/Hermes.Memory.Tests/Hermes.Memory.Tests.csproj -c Release --logger "console;verbosity=normal"
