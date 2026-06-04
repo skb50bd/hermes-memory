@@ -9,15 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: hermes_test
-          POSTGRES_USER: postgres
-        ports: ["5432:5432"]
-        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -26,29 +17,38 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Start Postgres with pgvector
+        run: |
+          docker run -d \
+            --name pg \
+            -e POSTGRES_PASSWORD=test \
+            -e POSTGRES_DB=hermes_test \
+            -e POSTGRES_USER=postgres \
+            -p 5432:5432 \
+            pgvector/pgvector:pg18 \
+            -c "shared_preload_libraries=pg_stat_statements"
+          for i in {1..30}; do
+            docker exec pg pg_isready -U postgres && break
+            sleep 1
+          done
+
+      - name: Install pg extensions + schema
+        run: |
+          docker exec -i pg psql -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          docker exec -i pg psql -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          docker exec -i pg psql -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS ltree;"
+          docker exec -i pg psql -U postgres -d hermes_test -f /docker-entrypoint-initdb.d/01-schemas.sql || true
+          cat docker/postgres/bin/01-schemas.sql | docker exec -i pg psql -U postgres -d hermes_test
+
       - name: Restore + build
         run: |
           dotnet restore Hermes.Memory.sln
           dotnet build Hermes.Memory.sln -c Release --no-restore
-
-      - name: Wait for Postgres
-        run: |
-          for i in {1..30}; do
-            PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "SELECT 1" && break
-            sleep 1
-          done
-
-      - name: Install pg extensions
-        run: |
-          PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
-          PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-          PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS ltree;"
-          PGPASSWORD=*** psql -h localhost -U postgres -d hermes_test -f docker/postgres/bin/01-schemas.sql
 
       - name: Run unit tests
         run: dotnet test tests/Hermes.Memory.Tests/Hermes.Memory.Tests.csproj -c Release --logger "console;verbosity=normal"
 
       - name: Run integration tests
         env:
-          HERMES_PG_CONN_STR: postgresql://postgres:***@localhost:5432/hermes_test
+          HERMES_PG_CONN_STR: postgresql://postgres:test@localhost:5432/hermes_test
         run: dotnet test tests/Hermes.Memory.Integration/Hermes.Memory.Integration.csproj -c Release --logger "console;verbosity=normal"
