@@ -41,6 +41,7 @@ from embedder import (  # noqa: E402
     Embedder, EmbeddingError, SUPPORTED_DIMS, DEFAULT_DIM,
     get_embedder, reset_embedder, get_all_embedders,
 )
+from budgeter import build_memory_block  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -604,6 +605,17 @@ class PostgresMemoryProvider(MemoryProvider):
         except Exception as e:
             logger.warning("Postgres system_prompt_block failed: %s", e)
             return "# PostgreSQL Vector Memory\nActive."
+
+    def prompt_memory_block(self, query: Optional[str] = None, char_budget: int = 2200) -> str:
+        """Return a memory block for prompt injection, respecting char budget.
+        This is the replacement for built-in MemoryStore.format_for_system_prompt()."""
+        if not self._client:
+            return ""
+        try:
+            return build_memory_block(self._client, query=query, char_budget=char_budget)
+        except Exception as e:
+            logger.warning("Postgres prompt_memory_block failed: %s", e)
+            return ""
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         if not self._client or not query or len(query.strip()) < 5:
