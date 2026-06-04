@@ -270,8 +270,44 @@ def search_chunks(query: str, top_k: int = 10) -> List[Dict]:
     ]
 
 
-def suggest_links(doc_id: int, top_k: int = 5, min_confidence: float = 0.6) -> List[Dict]:
-    """Suggest links to other documents based on chunk similarity."""
+_STOP_WORDS = frozenset({
+    "this", "that", "with", "have", "from", "they", "will", "would", "there",
+    "their", "what", "said", "each", "which", "does", "could", "should",
+    "about", "above", "after", "again", "against", "all", "and", "any",
+    "are", "because", "been", "before", "being", "below", "between",
+    "both", "but", "can", "did", "down", "during", "for", "had", "has",
+    "her", "here", "hers", "him", "his", "how", "into", "its", "may",
+    "more", "most", "not", "now", "off", "once", "only", "other", "our",
+    "out", "over", "own", "same", "she", "some", "such", "than", "them",
+    "then", "these", "those", "too", "under", "until", "very", "was",
+    "were", "when", "where", "who", "whom", "why", "your",
+})
+
+
+def _extract_search_terms(text: str, max_terms: int = 5) -> str:
+    """Extract key search terms from text for FTS query.
+
+    Removes stop words, keeps nouns/verbs, builds an OR query.
+    """
+    words = re.findall(r"\b[a-zA-Z]{4,}\b", text.lower())
+    filtered = [w for w in words if w not in _STOP_WORDS]
+    seen: set = set()
+    terms: List[str] = []
+    for w in filtered:
+        if w not in seen:
+            seen.add(w)
+            terms.append(w)
+        if len(terms) >= max_terms:
+            break
+    return " | ".join(terms) if terms else text[:50]
+
+
+def suggest_links(doc_id: int, top_k: int = 5, min_confidence: float = 0.6, embedder=None) -> List[Dict]:
+    """Suggest links to other documents based on chunk similarity.
+    
+    Uses vector similarity when embedder is provided, falls back to FTS otherwise.
+    FTS confidence is scaled to be comparable with vector similarity (0-1 range).
+    """
     with _cursor() as cur:
         # Get doc chunks
         cur.execute(
@@ -282,37 +318,72 @@ def suggest_links(doc_id: int, top_k: int = 5, min_confidence: float = 0.6) -> L
 
         suggestions = []
         for chunk_id, content in chunks:
-            # Find similar chunks in other docs
-            cur.execute(
-                """
-                SELECT DISTINCT d.id, d.slug, d.title
-                FROM hermes_wiki.document_chunks c
-                JOIN hermes_wiki.documents d ON d.id = c.document_id
-                WHERE c.document_id != %s
-                  AND c.content_tsv @@ plainto_tsquery('english', %s)
-                LIMIT %s
-                """,
-                (doc_id, content[:500], top_k),
-            )
-            for target_id, target_slug, target_title in cur.fetchall():
-                suggestions.append({
-                    "source_doc_id": doc_id,
-                    "target_doc_id": target_id,
-                    "target_slug": target_slug,
-                    "target_title": target_title,
-                    "kind": "related",
-                    "confidence": 0.7,  # placeholder — would use vector similarity
-                    "context": content[:200],
-                })
+            if embedder:
+                # Vector similarity search
+                embedding = embedder.embed(content)
+                dim = len(embedding)
+                col = f"vector_{dim}"
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT d.id, d.slug, d.title,
+                        1 - (c.{col} <=> %s::vector) AS similarity
+                    FROM hermes_wiki.document_chunks c
+                    JOIN hermes_wiki.documents d ON d.id = c.document_id
+                    WHERE c.document_id != %s
+                      AND c.{col} IS NOT NULL
+                    ORDER BY similarity DESC
+                    LIMIT %s
+                    """,
+                    (embedding, doc_id, top_k),
+                )
+                for target_id, target_slug, target_title, similarity in cur.fetchall():
+                    suggestions.append({
+                        "source_doc_id": doc_id,
+                        "target_doc_id": target_id,
+                        "target_slug": target_slug,
+                        "target_title": target_title,
+                        "kind": "related",
+                        "confidence": float(similarity) if similarity else 0.0,
+                        "context": content[:200],
+                    })
+            else:
+                # FTS fallback — use extracted key terms instead of full content
+                query = _extract_search_terms(content)
+                cur.execute(
+                    """
+                    SELECT DISTINCT d.id, d.slug, d.title,
+                        ts_rank(c.content_tsv, to_tsquery('english', %s)) AS rank
+                    FROM hermes_wiki.document_chunks c
+                    JOIN hermes_wiki.documents d ON d.id = c.document_id
+                    WHERE c.document_id != %s
+                      AND c.content_tsv @@ to_tsquery('english', %s)
+                    ORDER BY rank DESC
+                    LIMIT %s
+                    """,
+                    (query, doc_id, query, top_k),
+                )
+                for target_id, target_slug, target_title, rank in cur.fetchall():
+                    # Scale FTS rank to 0-1 range (typical raw ranks are 0.0-0.1)
+                    scaled_conf = min(float(rank) * 10.0, 1.0) if rank else 0.5
+                    suggestions.append({
+                        "source_doc_id": doc_id,
+                        "target_doc_id": target_id,
+                        "target_slug": target_slug,
+                        "target_title": target_title,
+                        "kind": "related",
+                        "confidence": scaled_conf,
+                        "context": content[:200],
+                    })
 
-    # Deduplicate by target
-    seen = set()
-    deduped = []
+    # Deduplicate by target, keep highest confidence
+    seen: Dict[int, Dict] = {}
     for s in suggestions:
-        if s["target_doc_id"] not in seen and s["confidence"] >= min_confidence:
-            seen.add(s["target_doc_id"])
-            deduped.append(s)
+        tid = s["target_doc_id"]
+        if tid not in seen or s["confidence"] > seen[tid]["confidence"]:
+            seen[tid] = s
 
+    deduped = [s for s in seen.values() if s["confidence"] >= min_confidence]
+    deduped.sort(key=lambda x: x["confidence"], reverse=True)
     return deduped[:top_k]
 
 
