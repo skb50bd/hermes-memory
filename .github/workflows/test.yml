@@ -37,8 +37,9 @@ jobs:
           docker exec -i pg psql -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
           docker exec -i pg psql -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
           docker exec -i pg psql -U postgres -d hermes_test -c "CREATE EXTENSION IF NOT EXISTS ltree;"
-          docker exec -i pg psql -U postgres -d hermes_test -f /docker-entrypoint-initdb.d/01-schemas.sql || true
-          cat docker/postgres/bin/01-schemas.sql | docker exec -i pg psql -U postgres -d hermes_test
+          # Copy repo into container so \ir relative paths in 01-schemas.sql resolve
+          docker cp . pg:/tmp/hermes-memory
+          docker exec -w /tmp/hermes-memory -i pg psql -U postgres -d hermes_test -v ON_ERROR_STOP=1 -f docker/postgres/bin/01-schemas.sql
 
       - name: Restore + build
         run: |
