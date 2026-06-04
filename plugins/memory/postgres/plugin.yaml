@@ -1,0 +1,11 @@
+name: postgres
+version: 1.7.0
+description: "PostgreSQL + pgvector memory — HNSW semantic search, full-text search, hybrid retrieval, categories, tags, TTL, soft deletes, and pluggable embedders."
+author: "Shakib Haris"
+license: "MIT"
+pip_dependencies:
+  - httpx
+requires_env:
+  - PG_MEM_DB_CONN_STR
+hooks:
+  - on_session_end
