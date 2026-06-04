@@ -142,9 +142,12 @@ write_profile_env() {
 }
 
 PROFILES_DIR="${HERMES_HOME}/profiles"
-if [[ -d "${PROFILES_DIR}" ]]; then
-    shopt -s nullglob
-    for prof_dir in "${PROFILES_DIR}"/*/; do
+shopt -s nullglob
+profile_dirs=("${PROFILES_DIR}"/*/)
+shopt -u nullglob
+
+if [[ ${#profile_dirs[@]} -gt 0 ]]; then
+    for prof_dir in "${profile_dirs[@]}"; do
         profile="$(basename "${prof_dir}")"
         [[ "${profile}" == "_templates" ]] && continue
         db_name="$(create_profile_db "${profile}")"
@@ -152,9 +155,8 @@ if [[ -d "${PROFILES_DIR}" ]]; then
         write_profile_env "${profile}" "${db_name}" "${env_file}"
         log "wrote ${env_file} → ${PG_DSN}/${db_name}"
     done
-    shopt -u nullglob
 else
-    log "no profiles dir found at ${PROFILES_DIR} — using single default profile"
+    log "no profiles dir at ${PROFILES_DIR} (or it's empty) — using single default profile"
     db_name="$(create_profile_db default)"
     env_file="${HERMES_HOME}/.env"
     write_profile_env default "${db_name}" "${env_file}"
