@@ -54,17 +54,24 @@ ARG PG_MAJOR
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Bring forward the apt sources and keyrings from the builder
+# Bring forward the apt sources, keyrings, AND ca-certificates from
+# the builder (which has ca-certificates installed). We need
+# ca-certificates in the runtime base BEFORE running `apt-get update`
+# because the pgvector base image ships with no Mozilla CA bundle, so
+# HTTPS repos (apt.postgresql.org, packagecloud.io) would fail cert
+# verification on the first update.
 COPY --from=builder /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
                     /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 COPY --from=builder /etc/apt/sources.list.d/pgdg.list          /etc/apt/sources.list.d/
 COPY --from=builder /etc/apt/trusted.gpg.d/timescaledb.gpg     /etc/apt/trusted.gpg.d/
 COPY --from=builder /etc/apt/sources.list.d/timescaledb.list   /etc/apt/sources.list.d/
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt         /etc/ssl/certs/ca-certificates.crt
 
-# Two-step: install ca-certificates first (so apt can verify HTTPS repos
-# during the next `apt-get update`), then install the extensions. The
-# three extension .debs each pull their declared runtime dependencies
-# via apt. We use --no-install-recommends to skip doc packages.
+# Install the three extension .debs. Each pulls its declared runtime
+# dependencies via apt. We use --no-install-recommends to skip doc
+# packages. The base image has no apt cache, so a fresh update runs
+# here. ca-certificates is already in place from the COPY above.
+#
 #   - postgresql-18-cron:      pg_cron background job scheduler
 #   - postgresql-18-timescaledb: TimescaleDB hypertables
 #   - postgresql-18-age:       Apache AGE graph extension
@@ -77,8 +84,6 @@ COPY --from=builder /etc/apt/sources.list.d/timescaledb.list   /etc/apt/sources.
 # still has OpenSSL libraries; we just lose the Mozilla CA bundle which
 # is only used by apt and curl.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && apt-get update \
     && apt-get install -y --no-install-recommends \
         postgresql-${PG_MAJOR}-cron \
         postgresql-${PG_MAJOR}-timescaledb \
