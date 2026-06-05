@@ -74,7 +74,7 @@ jobs:
             ${{ steps.refs.outputs.is_main && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
           labels: |
             org.opencontainers.image.title=hermes-postgres
-            org.opencontainers.image.description=Postgres 18 + pgvector + pg_trgm + ltree + postgis + timescaledb + pg_cron + apache-age for the Hermes Agent platform
+            org.opencontainers.image.description=Postgres 18 + pgvector + pg_trgm + ltree + timescaledb + pg_cron + apache-age for the Hermes Agent platform
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ env.IMAGE_TAG }}
@@ -113,11 +113,11 @@ jobs:
         run: |
           # Run the bundled init script (creates hermes_template + hermes_cron)
           docker exec pg-smoke /usr/local/bin/hermes-init.sh
-          # All 6 extensions must be present in hermes_template
+          # All 5 extensions must be present in hermes_template
           docker exec pg-smoke psql -U postgres -d hermes_template -tAc \
-            "SELECT extname FROM pg_extension WHERE extname IN ('vector','pg_trgm','ltree','postgis','timescaledb','age') ORDER BY 1" \
+            "SELECT extname FROM pg_extension WHERE extname IN ('vector','pg_trgm','ltree','timescaledb','age') ORDER BY 1" \
             | tee /tmp/exts.txt
-          test "$(wc -l < /tmp/exts.txt)" -ge 4 || (echo "expected at least 4 extensions, got:"; cat /tmp/exts.txt; exit 1)
+          test "$(wc -l < /tmp/exts.txt)" -eq 5 || (echo "expected 5 extensions, got:"; cat /tmp/exts.txt; exit 1)
           # All 5 user schemas must exist
           docker exec pg-smoke psql -U postgres -d hermes_template -tAc \
             "SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('agent_memory','hermes_wiki','hermes_journal','hermes_skills','hermes_metrics') ORDER BY 1" \

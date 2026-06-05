@@ -13,13 +13,13 @@
 #   HERMES_PG_USER=hermes                 # postgres role (default: hermes)
 #   HERMES_PG_PASSWORD=***           # role password (default: changeme)
 #   HERMES_TEMPLATE_DB=hermes_template     # template DB name
-#   HERMES_POSTGRES_IMAGE=ghcr.io/skb50bd/hermes-memory/hermes-postgres:18
+#   HERMES_POSTGRES_IMAGE=ghcr.io/skb50bd/hermes-memory/hermes-postgres:latest
 
 name: hermes-memory
 
 services:
   postgres:
-    image: ${HERMES_POSTGRES_IMAGE:-ghcr.io/skb50bd/hermes-memory/hermes-postgres:18}
+    image: ${HERMES_POSTGRES_IMAGE:-ghcr.io/skb50bd/hermes-memory/hermes-postgres:latest}
     container_name: hermes-postgres
     mem_limit: 2g
     cpus: "2.00"
