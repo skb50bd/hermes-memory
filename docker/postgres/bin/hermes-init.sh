@@ -21,15 +21,17 @@ until pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
 done
 
-# Create the template DB if it doesn't exist
-DB_EXISTS=$(psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB'" 2>/dev/null || echo "")
-
-if [ -z "$DB_EXISTS" ]; then
-    echo "[hermes-init] Creating database $DB..."
-    psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE $DB"
-else
-    echo "[hermes-init] Database $DB already exists, skipping create."
-fi
+# Create the template DB if it doesn't exist. We use psql's \gexec to
+# execute the CREATE inside the same session as the existence check,
+# avoiding a TOCTOU race. When the init.d symlink (99-hermes-init.sh)
+# and an explicit manual call race on a fresh container, a
+# check-then-create pattern produces a "duplicate key" error if the
+# init.d script creates the DB between the check and the create.
+psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+SELECT 'CREATE DATABASE $DB'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname='$DB')
+\gexec
+SQL
 
 # Install the 5 extensions (minus pg_cron — it lives in hermes_cron)
 echo "[hermes-init] Installing extensions..."

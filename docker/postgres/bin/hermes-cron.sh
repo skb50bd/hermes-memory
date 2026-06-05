@@ -19,14 +19,12 @@ until pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
 done
 
-# Create the cron DB if it doesn't exist
-DB_EXISTS=$(psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$CRON_DB'" 2>/dev/null || echo "")
-if [ -z "$DB_EXISTS" ]; then
-    echo "[hermes-cron] Creating database $CRON_DB..."
-    psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE $CRON_DB"
-else
-    echo "[hermes-cron] Database $CRON_DB already exists."
-fi
+# Create the cron DB if it doesn't exist (TOCTOU-safe via \gexec)
+psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+SELECT 'CREATE DATABASE $CRON_DB'
+ WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname='$CRON_DB')
+\gexec
+SQL
 
 # Install pg_cron and schedule the jobs
 echo "[hermes-cron] Installing pg_cron and scheduling jobs..."
