@@ -74,6 +74,14 @@ jobs:
       - uses: dorny/paths-filter@v4
         id: filter
         with:
+          # Pin the diff base so workflow_dispatch (no `before` payload) and
+          # tag pushes (no `before` payload) don't trigger the
+          # "'before' field is missing - changes will be detected from last
+          # commit" warning. Using HEAD as the base means the filter
+          # reports no changes for those events, and the per-job
+          # `|| github.event_name == 'workflow_dispatch'` override below
+          # handles the manual-run case.
+          base: ${{ github.event.pull_request.base.sha || github.sha }}
           filters: |
             lint:
               - 'src/**'
@@ -319,11 +327,16 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.refs.outputs.tag }}
-          # GHA build cache is disabled per commit 39b9ab2 — the cache
-          # backend returns 400 "Our services aren't available right now"
-          # intermittently. Re-enable when stable.
-          cache-from: ""
-          cache-to: ""
+          # GHA build cache. Re-enabled per user request. The original
+          # commit 39b9ab2 disabled it because the `cache-to` backend was
+          # returning 400 errors ("Our services aren't available right
+          # now") intermittently during a Docker Hub outage. `cache-from`
+          # is read-only and does NOT depend on that backend — it's served
+          # by GHA's own cache (separate from Docker Hub). `cache-to`
+          # writes to GHA's cache (also separate) so we re-enable both.
+          # If a future outage hits GHA's cache, comment these out.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # --------------------------------------------------------------------------
   # Stage 4b: Build the Postgres image (multi-arch via buildx).
@@ -390,8 +403,8 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.refs.outputs.tag }}
-          cache-from: ""
-          cache-to: ""
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # --------------------------------------------------------------------------
   # Stage 5a: Smoke-test the binary (extract from multi-arch image, amd64 only).
