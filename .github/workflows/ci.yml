@@ -469,6 +469,12 @@ jobs:
       - name: Wait for init.d to complete
         # pg_isready returns BEFORE docker_temp_server_stop. Poll for
         # the sentinel DB (hermes_template) to exist before verifying.
+        # After it appears, sleep a few more seconds to let the upstream
+        # entrypoint stop the temp server and bring up the real one. We
+        # observed otherwise that the very next psql can hit a temp
+        # server mid-shutdown ("FATAL: the database system is shutting
+        # down") and fail the profile-clone step with a flake. 3s is
+        # enough; 5s for safety on slow GHA runners.
         run: |
           for i in {1..60}; do
             if docker exec pg-smoke pg_isready -U postgres >/dev/null 2>&1; then
@@ -476,6 +482,12 @@ jobs:
                   "SELECT 1 FROM pg_database WHERE datname='hermes_template'" \
                   2>/dev/null | grep -q 1; then
                 echo "init.d complete after ${i}s (hermes_template exists)"
+                echo "stabilizing for temp-server shutdown..."
+                sleep 5
+                # Re-verify pg_isready so we fail fast if the real server
+                # didn't actually come up after the temp one stopped.
+                docker exec pg-smoke pg_isready -U postgres >/dev/null 2>&1 \
+                  || (echo "real server not ready after stabilization"; exit 1)
                 break
               fi
             fi
