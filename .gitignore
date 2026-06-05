@@ -32,3 +32,4 @@ Thumbs.db
 
 # Tooling caches
 .audit/
+**/__pycache__/

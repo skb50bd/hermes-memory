@@ -30,6 +30,8 @@ public static class Program
         root.AddCommand(BuildProfileCommand());
         root.AddCommand(BuildEmbedCommand());
         root.AddCommand(BuildVersionCommand());
+        root.AddCommand(InstallCommand.Build());
+        root.AddCommand(UninstallCommand.Build());
 
         return await root.InvokeAsync(args);
     }
