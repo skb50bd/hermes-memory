@@ -121,6 +121,7 @@ def main() -> int:
     host = os.environ.get("HOST", "127.0.0.1")
     port = os.environ.get("HOST_PORT", "5432")
     user = os.environ.get("PG_USER", "hermes")
+    profile = os.environ.get("HERMES_INSTALL_PROFILE", "").strip()
 
     password = resolve_password()
     if not password:
@@ -137,15 +138,39 @@ def main() -> int:
     if not dbs:
         dbs = ["hermes_default"]
 
+    if profile:
+        # Per-profile mode: write ONLY this profile's DSN to the profile's .env.
+        # Use the per-profile role (hermes_<name>) and DB (hermes_<name>),
+        # and pull the per-profile role password from the state file.
+        # The bootstrap script (hermes-bootstrap.sh) created both the
+        # role and the DB and wrote the password to
+        # ~/.hermes/state/hermes-pg-<name>.password.
+        prof_pw_file = Path.home() / ".hermes" / "state" / f"hermes-pg-{profile}.password"
+        if prof_pw_file.exists():
+            prof_pw = prof_pw_file.read_text().strip()
+            if prof_pw:
+                password = prof_pw
+                print(f"  ✓ profile password loaded from {prof_pw_file} (length: {len(password)})")
+        target_db = f"hermes_{profile}"
+        dbs = [target_db]
+        user = f"hermes_{profile}"
+        # Override hermes_home to the profile dir — every DSN lands in
+        # ~/.hermes/profiles/<name>/.env, not the main ~/.hermes/.env.
+        hermes_home = str(Path(hermes_home) / "profiles" / profile)
+        print(f"  ✓ profile mode: target={hermes_home} user={user} db={target_db}")
+
     for db in dbs:
         dsn = f"postgresql://{user}:***@{host}:{port}/{db}"
         # The above is a redacted form. We need the real one. Replace the marker.
         dsn = dsn.replace("***", password, 1)
-        if db == "hermes_default":
+        if profile:
+            # In profile mode, every DSN goes to the profile's .env.
+            env_file = Path(hermes_home) / ".env"
+        elif db == "hermes_default":
             env_file = Path(hermes_home) / ".env"
         else:
-            profile = db.replace("hermes_", "")
-            env_file = Path(hermes_home) / "profiles" / profile / ".env"
+            prof = db.replace("hermes_", "")
+            env_file = Path(hermes_home) / "profiles" / prof / ".env"
         write_env(env_file, dsn)
 
     print(f"DB_LIST={','.join(dbs)}")
@@ -154,7 +179,10 @@ def main() -> int:
     # Step 8 (MCP register) needs this to know it can proceed, and uses
     # resolve_password() to substitute the real password when registering.
     # The state file lives at ~/.hermes/state/hermes-memory.json.
-    state_file = Path(hermes_home) / "state" / "hermes-memory.json"
+    # In profile mode, hermes_home is the profile dir; the state file
+    # still lives at the main home's state dir.
+    state_dir = os.environ.get("HERMES_STATE_DIR", str(Path.home() / ".hermes" / "state"))
+    state_file = Path(state_dir) / "hermes-memory.json"
     if state_file.exists():
         try:
             state = json.loads(state_file.read_text())

@@ -390,10 +390,27 @@ def resolve_password(hermes_home: Path, repo: Path) -> str:
     `POSTGRES_PASSWORD=*** POSTGRES_PORT=5432` and the redaction
     system concatenated the two). Trust auth on the local dev container
     means any sane password works, so a clean value is preferable.
+
+    In per-profile mode (HERMES_INSTALL_PROFILE set), looks at the
+    profile's password file (~/.hermes/state/hermes-pg-<name>.password)
+    FIRST, before falling back to the main env/compose/DSN paths.
     """
     def _is_clean(pw: str) -> bool:
         return bool(pw) and not any(c.isspace() for c in pw)
 
+    # 0. Per-profile password file (created by hermes-bootstrap.sh).
+    # Read this FIRST in profile mode — the per-profile DSN uses the
+    # role password, which is the cleanest, most-authoritative source.
+    profile = os.environ.get("HERMES_INSTALL_PROFILE", "").strip()
+    if profile:
+        prof_pw_file = Path.home() / ".hermes" / "state" / f"hermes-pg-{profile}.password"
+        if prof_pw_file.exists():
+            try:
+                pw = prof_pw_file.read_text().strip()
+                if _is_clean(pw):
+                    return pw
+            except OSError:
+                pass
     # 1. Env var
     pw = os.environ.get(PW_ENV_NAME, "").strip()
     if _is_clean(pw):
@@ -451,14 +468,30 @@ def resolve_password(hermes_home: Path, repo: Path) -> str:
 class Wizard:
     def __init__(self):
         self.repo = detect_repo_root()
-        self.hermes_home = detect_hermes_home()
+        self.profile = os.environ.get("HERMES_INSTALL_PROFILE", "").strip()
+        base = detect_hermes_home()
+        if self.profile:
+            # Per-profile install: point hermes_home at the profile directory.
+            # Steps that read ~/.hermes/.env, write config.yaml, etc. will
+            # then target the profile instead of the main home.
+            self.hermes_home = base / "profiles" / self.profile
+            self.config_path = self.hermes_home / "config.yaml"
+        else:
+            self.hermes_home = base
+            self.config_path = self.hermes_home / "config.yaml"
         self.state = State()
 
     def write_dsn(self, dbs: list[str], user: str, host: str, port: int, password: str):
         for db in dbs:
             dsn = f"postgresql://{user}:***@{host}:{port}/{db}"
             dsn_real = dsn.replace("***", password, 1)
-            if db == "hermes_default":
+            if self.profile:
+                # Per-profile mode: every DSN goes to the profile's own .env.
+                # `hermes_default` is still treated as the profile's DB here
+                # because in profile mode, the caller has already renamed it
+                # (e.g. "hermes_fluffy").
+                env_file = self.hermes_home / ".env"
+            elif db == "hermes_default":
                 env_file = self.hermes_home / ".env"
             else:
                 profile = db.replace("hermes_", "")
@@ -709,14 +742,73 @@ def step_dsn(wiz: Wizard):
     user = os.environ.get("HERMES_PG_USER", "hermes")
     password = resolve_password(wiz.hermes_home, wiz.repo)
     ok(f"Resolved password (length: {len(password)})")
+    all_dbs = wiz.state.get("databases.profiles", ["hermes_default"])
+    if wiz.profile:
+        # Per-profile mode: write ONLY this profile's DSN to its own .env.
+        # The DSN uses the per-profile ROLE (hermes_<name>) and the
+        # per-profile DB (hermes_<name>), and the role password (which
+        # resolve_password() pulled from ~/.hermes/state/hermes-pg-<name>.password).
+        target_db = f"hermes_{wiz.profile}"
+        if target_db not in all_dbs:
+            all_dbs = [target_db]
+        dbs = [target_db]
+        user = f"hermes_{wiz.profile}"
+        info(f"profile mode: writing DSN only for {target_db} (as {user}) -> {wiz.hermes_home / '.env'}")
+    else:
+        dbs = all_dbs
     ok(f"Postgres target: {user} @ 127.0.0.1:{host_port}")
-    dbs = wiz.state.get("databases.profiles", ["hermes_default"])
     wiz.write_dsn(dbs, user, "127.0.0.1", host_port, password)
 
 
 @register(6, "Configure embedder provider")
 def step_embedder(wiz: Wizard):
     step(6, 11, "Configure embedder provider")
+
+    if wiz.profile:
+        # ─── Per-profile shortcut: copy embedder config from the main
+        # ~/.hermes/.env (if present) into the profile's .env. The user
+        # has already configured their embedder globally; the profile
+        # inherits it. If the main env has no embedder config, fall
+        # through to the interactive wizard.
+        main_env = detect_hermes_home() / ".env"
+        profile_env = wiz.hermes_home / ".env"
+        if main_env.exists():
+            embedder_keys = [
+                "HERMES_EMBED_PROVIDER_768", "HERMES_EMBED_BASE_URL_768", "HERMES_EMBED_MODEL_768",
+                "HERMES_EMBED_PROVIDER_1024", "HERMES_EMBED_BASE_URL_1024", "HERMES_EMBED_MODEL_1024",
+                "HERMES_EMBED_PROVIDER_1536", "HERMES_EMBED_BASE_URL_1536", "HERMES_EMBED_MODEL_1536",
+                "HERMES_EMBED_DEFAULT_DIM",
+            ]
+            main_text = main_env.read_text()
+            kv = {}
+            for line in main_text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip(); v = v.strip().strip('"').strip("'")
+                if k in embedder_keys:
+                    kv[k] = v
+            if kv:
+                # Inherit into the profile's .env
+                profile_env.parent.mkdir(parents=True, exist_ok=True)
+                existing = profile_env.read_text() if profile_env.exists() else ""
+                for k, v in kv.items():
+                    if re.search(rf"^{re.escape(k)}=", existing, flags=re.M):
+                        existing = re.sub(rf"^{re.escape(k)}=.*$", f"{k}={v}", existing, flags=re.M)
+                    else:
+                        if existing and not existing.endswith("\n"):
+                            existing += "\n"
+                        existing += f"{k}={v}\n"
+                profile_env.write_text(existing)
+                ok(f"profile mode: inherited {len(kv)} embedder vars from {main_env} -> {profile_env}")
+                wiz.state.set("embedder.provider", "inherited")
+                wiz.state.set("embedder.inherited_from", str(main_env))
+                wiz.state.touch()
+                wiz.state.save()
+                return
+        info("profile mode: no embedder config in main .env; falling through to interactive wizard")
+
     info("The memory + wiki + journal + skills tools all need an embedder to convert text → vectors.")
     info("Pick the one you'll use. Re-run with --change-embedder to switch later.")
     current = wiz.state.get("embedder.provider", "ollama_local")
@@ -860,61 +952,116 @@ def step_mcp(wiz: Wizard):
     dsn = wiz.state.get("databases.dsn")
     if not dsn:
         fail("Step 5 (DSN) must run first")
-    # Use hermes mcp add
-    server_name = os.environ.get("HERMES_MEMORY_MCP_NAME", "hermes-memory")
-    info(f"Calling: hermes mcp add {server_name} --command {bin_path} --args --mcp --env HERMES_PG_CONN_STR=…")
-    # If already registered, hermes mcp add errors out; remove first.
-    r = subprocess.run(["hermes", "mcp", "list"], capture_output=True, text=True)
-    if server_name in (r.stdout or ""):
-        warn(f"'{server_name}' is already registered. Re-registering to update env.")
-        subprocess.run(["hermes", "mcp", "remove", server_name], capture_output=True)
     # Get the actual password (not the redacted form) to inject into the env block
     password = resolve_password(wiz.hermes_home, wiz.repo)
+    server_name = os.environ.get("HERMES_MEMORY_MCP_NAME", "hermes-memory")
     env_pairs = [
         f"HERMES_PG_CONN_STR={dsn.replace('***', password, 1)}",
         "HERMES_EMBED_FAIL_OPEN=1",
     ]
-    r = subprocess.run(
-        ["hermes", "mcp", "add", server_name,
-         "--command", bin_path,
-         "--args=--mcp",
-         "--env", *env_pairs],
-        capture_output=True, text=True, input="y\n",
-    )
-    if r.returncode != 0:
-        fail(f"hermes mcp add failed: {r.stderr or r.stdout}")
-    # The `hermes mcp add --env KEY=VALUE` flag is buggy in some hermes
-    # versions — it does not persist the env block. Patch the YAML
-    # directly to guarantee the env is set when the MCP server starts.
-    config_path = wiz.hermes_home / "config.yaml"
-    if config_path.exists():
-        try:
-            import yaml
-            with config_path.open() as f:
-                cfg = yaml.safe_load(f) or {}
-            servers = cfg.setdefault("mcp_servers", {})
-            entry = servers.setdefault(server_name, {})
-            entry["env"] = {p.split("=", 1)[0]: p.split("=", 1)[1] for p in env_pairs if "=" in p}
-            entry["enabled"] = True
-            with config_path.open("w") as f:
-                yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
-            ok(f"Patched {config_path} with env block (hermes mcp add --env fallback)")
-        except Exception as e:
-            warn(f"YAML env-block patch failed: {e}")
-    ok(f"Registered MCP server '{server_name}'")
-    # Verify
-    r = subprocess.run(["hermes", "mcp", "test", server_name], capture_output=True, text=True)
-    out = (r.stdout or "") + (r.stderr or "")
-    if "OK" in out or r.returncode == 0:
-        ok("MCP server responds to handshake")
-    elif "disabled" in out:
-        warn("MCP server saved but disabled; check your hermes config")
+
+    if wiz.profile:
+        # ─── Per-profile mode ───────────────────────────────────────────
+        # The `hermes mcp add` CLI always writes to the MAIN home's
+        # config.yaml, which is the wrong target here. Skip the CLI
+        # entirely and write the YAML directly to this profile's
+        # config.yaml. Also set `memory.provider: postgres` so the
+        # profile's agent uses the plugin.
+        info(f"profile mode: writing MCP block directly to {wiz.config_path}")
+        _write_profile_mcp_and_provider(
+            config_path=wiz.config_path,
+            server_name=server_name,
+            bin_path=bin_path,
+            env_pairs=env_pairs,
+        )
+        ok(f"Wrote MCP server '{server_name}' + memory.provider:postgres to {wiz.config_path}")
     else:
-        warn(f"MCP test returned: {out.strip()[:200]}")
+        # ─── Default mode (existing behavior) ───────────────────────────
+        info(f"Calling: hermes mcp add {server_name} --command {bin_path} --args --mcp --env HERMES_PG_CONN_STR=…")
+        # If already registered, hermes mcp add errors out; remove first.
+        r = subprocess.run(["hermes", "mcp", "list"], capture_output=True, text=True)
+        if server_name in (r.stdout or ""):
+            warn(f"'{server_name}' is already registered. Re-registering to update env.")
+            subprocess.run(["hermes", "mcp", "remove", server_name], capture_output=True)
+        r = subprocess.run(
+            ["hermes", "mcp", "add", server_name,
+             "--command", bin_path,
+             "--args=--mcp",
+             "--env", *env_pairs],
+            capture_output=True, text=True, input="y\n",
+        )
+        if r.returncode != 0:
+            fail(f"hermes mcp add failed: {r.stderr or r.stdout}")
+        # The `hermes mcp add --env KEY=VALUE` flag is buggy in some hermes
+        # versions — it does not persist the env block. Patch the YAML
+        # directly to guarantee the env is set when the MCP server starts.
+        if wiz.config_path.exists():
+            try:
+                import yaml
+                with wiz.config_path.open() as f:
+                    cfg = yaml.safe_load(f) or {}
+                servers = cfg.setdefault("mcp_servers", {})
+                entry = servers.setdefault(server_name, {})
+                entry["env"] = {p.split("=", 1)[0]: p.split("=", 1)[1] for p in env_pairs if "=" in p}
+                entry["enabled"] = True
+                with wiz.config_path.open("w") as f:
+                    yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+                ok(f"Patched {wiz.config_path} with env block (hermes mcp add --env fallback)")
+            except Exception as e:
+                warn(f"YAML env-block patch failed: {e}")
+        ok(f"Registered MCP server '{server_name}'")
+    # Verify (skipped in profile mode — `hermes mcp test` operates on the
+    # main home, not the profile; the per-profile gateway would need to
+    # be running to test it end-to-end).
+    if not wiz.profile:
+        r = subprocess.run(["hermes", "mcp", "test", server_name], capture_output=True, text=True)
+        out = (r.stdout or "") + (r.stderr or "")
+        if "OK" in out or r.returncode == 0:
+            ok("MCP server responds to handshake")
+        elif "disabled" in out:
+            warn("MCP server saved but disabled; check your hermes config")
+        else:
+            warn(f"MCP test returned: {out.strip()[:200]}")
+    else:
+        info("profile mode: skipping `hermes mcp test` (operates on main home; restart profile gateway to test)")
     wiz.state.set("mcp.registered", True)
     wiz.state.set("mcp.server_name", server_name)
     wiz.state.touch()
     wiz.state.save()
+
+
+def _write_profile_mcp_and_provider(
+    config_path: Path,
+    server_name: str,
+    bin_path: str,
+    env_pairs: list[str],
+) -> None:
+    """Direct YAML write to a profile's config.yaml — used in profile
+    mode to bypass `hermes mcp add` (which always targets the main
+    home). Also sets `memory.provider: postgres` so the profile's
+    agent loads the Python plugin.
+    """
+    import yaml
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    if config_path.exists():
+        with config_path.open() as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+    # 1. mcp_servers.<name> entry
+    servers = cfg.setdefault("mcp_servers", {})
+    entry = servers.setdefault(server_name, {})
+    entry["command"] = bin_path
+    entry["args"] = ["--mcp"]
+    entry["env"] = {p.split("=", 1)[0]: p.split("=", 1)[1] for p in env_pairs if "=" in p}
+    entry["enabled"] = True
+    # 2. memory.provider: postgres
+    mem = cfg.setdefault("memory", {})
+    mem.setdefault("memory_enabled", True)
+    mem.setdefault("user_profile_enabled", True)
+    mem["provider"] = "postgres"
+    with config_path.open("w") as f:
+        yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
 
 
 @register(9, "Tool introduction (Python plugin)")
