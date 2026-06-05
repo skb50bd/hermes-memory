@@ -1,38 +1,57 @@
-# Multi-stage build that produces a single statically-linked AOT binary
-# suitable for copying into the Postgres Docker image (and for general
-# distribution on linux-x64 / linux-arm64).
+# Multi-arch AOT build of the hermes-memory CLI.
 #
-#   docker build -f Dockerfile.publish -t hermes-memory-binary:0.1.0 .
+# Buildx cross-compiles per-arch by injecting TARGETARCH (amd64|arm64) into
+# the dotnet publish call. No qemu, no matrix — one job, both archs, buildx
+# runs them in parallel using the docker-container driver.
 #
-# Output binary at /hermes-memory.
+#   docker buildx build -f Dockerfile.publish \
+#       --platform linux/amd64,linux/arm64 \
+#       -t hermes-memory:dev --load .
+#
+# Output: a multi-arch image whose ENTRYPOINT is the AOT binary at /hermes-memory.
+# On the runner (buildx's `--load` lands a single-platform manifest), pick
+# --platform=linux/amd64 OR --platform=linux/arm64 to extract a specific one.
 
-# ---- Build stage ----
-FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+# syntax=docker/dockerfile:1.7
+ARG DOTNET_VERSION=10.0
+
+# ---- Build stage (arch-aware via TARGETARCH) ----
+# BUILDPLATFORM pins the SDK stage to the build machine's native arch so
+# dotnet restore/publish runs natively and only the *output* is cross-arch.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:$DOTNET_VERSION AS build
+ARG TARGETARCH
 ARG VERSION=0.1.0
 ARG COMMIT=dev
 WORKDIR /src
 
-# Restore (cached layer)
-COPY Hermes.Memory.sln ./
+# Restore dependencies for the CLI project (skip the .sln — it pulls in
+# tests/ we don't need in the build context).
 COPY Directory.Build.props Directory.Packages.props global.json ./
 COPY src/Hermes.Memory.Core/Hermes.Memory.Core.csproj src/Hermes.Memory.Core/
 COPY src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj src/Hermes.Memory.Cli/
-RUN dotnet restore Hermes.Memory.sln
+RUN dotnet restore src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj -r linux-$TARGETARCH
 
-# Build + Publish
+# Build + Publish (arch-specific, self-contained, NOT trimmed, NOT AOT).
+# AOT + trim are intentionally off — see Hermes.Memory.Core.csproj note.
+# Reflection-based JSON is used in HermesEmbedder (cache) and KanbanTools
+# (MCP results); a future task will register every DTO in
+# JsonSerializerContext.cs and flip PublishAot=true. Until then, the
+# self-contained build is the shipping artifact (~80MB but works).
 COPY src/ src/
 RUN dotnet publish src/Hermes.Memory.Cli/Hermes.Memory.Cli.csproj \
         -c Release \
-        -r linux-x64 \
-        --self-contained \
-        -p:PublishAot=true \
+        -r linux-$TARGETARCH \
+        --self-contained true \
         -p:PublishSingleFile=true \
         -p:Version=${VERSION} \
         -p:SourceRevisionId=${COMMIT} \
         -o /publish
 
 # ---- Runtime stage ----
-# Final image is just the binary; no runtime, no shell, no nothing.
-FROM scratch
+# distroless-style runtime-deps image: glibc + libstdc++ + ca-certs, nothing else.
+# The AOT binary is self-contained, so ~50MB final layer is achievable.
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS runtime
+ARG TARGETARCH
 COPY --from=build /publish/hermes-memory /hermes-memory
+USER nobody
 ENTRYPOINT ["/hermes-memory"]

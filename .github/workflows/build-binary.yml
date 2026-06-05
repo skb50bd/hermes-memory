@@ -1,0 +1,112 @@
+name: build-binary
+
+# Builds the hermes-memory CLI as a multi-arch NativeAOT single-file binary.
+# Output: a multi-arch image ghcr.io/<repo>/hermes-memory:<tag> with the AOT
+# binary at /hermes-memory on a runtime-deps base. Consumers either run the
+# image directly or `docker create` it to extract the binary.
+#
+# Multi-arch via buildx cross-compile using TARGETARCH — no qemu, no matrix.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/hermes-memory
+  IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || (github.ref == 'refs/heads/main' && format('main-{0}', github.sha_short) || format('pr-{0}', github.event.pull_request.number)) }}
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:v0.18.0
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          echo "tag=${{ env.IMAGE_TAG }}" >> $GITHUB_OUTPUT
+          echo "is_release=${{ github.ref_type == 'tag' }}" >> $GITHUB_OUTPUT
+          echo "is_main=${{ github.ref == 'refs/heads/main' }}" >> $GITHUB_OUTPUT
+
+      - name: Build and push (multi-arch AOT)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.publish
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ steps.refs.outputs.is_release && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
+            ${{ steps.refs.outputs.is_main && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          build-args: |
+            VERSION=${{ env.IMAGE_TAG }}
+            COMMIT=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.title=hermes-memory
+            org.opencontainers.image.description=Hermes memory CLI (NativeAOT single-file binary, multi-arch)
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke-test:
+    # Run the binary on a single arch (amd64) to catch reflection / AOT
+    # regressions. arm64 still produces a real binary — we just don't boot
+    # it on GHA's free arm64 minutes.
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ephemeral test binary
+        run: |
+          docker buildx build --load \
+            --platform linux/amd64 \
+            -t hermes-memory:smoke \
+            -f Dockerfile.publish .
+
+      - name: Create ephemeral container
+        run: |
+          docker create --name mem-smoke hermes-memory:smoke
+
+      - name: Extract binary and smoke-test
+        run: |
+          docker cp mem-smoke:/hermes-memory /tmp/hermes-memory
+          chmod +x /tmp/hermes-memory
+          /tmp/hermes-memory --version
+          /tmp/hermes-memory --help | head -20
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f mem-smoke 2>/dev/null || true

@@ -1,5 +1,9 @@
 name: build-docker
 
+# Builds the hermes-postgres image (Postgres 18 + pgvector + extensions).
+# Multi-arch via buildx + native arm64 variant of the base image — NO qemu,
+# NO binfmt, NO matrix. One job, both archs, parallel inside buildx.
+
 on:
   push:
     branches: [main]
@@ -19,6 +23,7 @@ env:
   # Use the short SHA on main pushes, the tag name on tag pushes, otherwise
   # a PR-scoped tag so we don't reuse `:latest` while iterating.
   IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || (github.ref == 'refs/heads/main' && format('main-{0}', github.sha_short) || format('pr-{0}', github.event.pull_request.number)) }}
+  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build:
@@ -30,22 +35,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          # Explicit binfmt registration so arm64 is emulated on the
-          # amd64 GHA runner. Without this, multi-arch builds silently
-          # request a native arm64 runner (which GHA does not provide
-          # on free tier) and hang waiting for one.
-          image: tonistiigi/binfmt:latest
-          platforms: arm64
-
+      # buildx is preinstalled on GHA runners as of 2024, but we still call
+      # the action to pin version + explicitly opt into the docker-container
+      # driver. docker-container is required for multi-arch + cache-to=gha.
+      # We do NOT install qemu or binfmt — buildx pulls the right native
+      # variant of pgvector/pgvector:pg18 from the registry manifest list,
+      # and PGDG/timescale repos publish arm64 packages.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          # Use the docker-container driver so multi-arch + cache-to=gha
-          # both work. The default docker driver can't do multi-arch.
-          driver-opts: image=moby/buildkit:v0.13.0
+          driver-opts: image=moby/buildkit:v0.18.0
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -67,7 +66,7 @@ jobs:
         with:
           context: .
           file: docker/postgres/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.PLATFORMS }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -93,7 +92,10 @@ jobs:
 
       - name: Build ephemeral test image
         run: |
-          docker build -t hermes-postgres:smoke -f docker/postgres/Dockerfile .
+          docker buildx build --load \
+            --platform linux/amd64 \
+            -t hermes-postgres:smoke \
+            -f docker/postgres/Dockerfile .
 
       - name: Start container
         run: |
