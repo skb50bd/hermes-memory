@@ -42,11 +42,9 @@ env:
   BINARY_IMAGE_NAME: ${{ github.repository }}/hermes-memory
   DOTNET_VERSION: 10.0.x
   PLATFORMS: linux/amd64,linux/arm64
-  # Opt all actions in this workflow into Node.js 24 BEFORE the June 16 2026
-  # cutoff. Without this, GHA emits a deprecation warning on every job that
-  # uses actions/checkout@v4, actions/setup-dotnet@v4, docker/setup-buildx-
-  # action@v3, etc. Setting it once at the workflow level is enough — every
-  # step inherits the env.
+  # All actions pinned to majors that target Node.js 24 natively. The
+  # FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 env below is kept as defense in
+  # depth for any future transitive action that hasn't migrated yet.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -69,11 +67,11 @@ jobs:
       postgres: ${{ steps.filter.outputs.postgres }}
       workflow: ${{ steps.filter.outputs.workflow }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -142,10 +140,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -173,10 +171,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -196,11 +194,10 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-results
           path: test-results/
-          if-no-files-found: warn
 
   # --------------------------------------------------------------------------
   # Stage 3: Integration tests — Testcontainers spins up ephemeral pgvector.
@@ -215,10 +212,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -227,7 +224,7 @@ jobs:
       # multi-stage Postgres build under docker/postgres/. Build it locally
       # for the test fixture so the test job doesn't depend on GHCR.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build hermes-postgres:dev for tests
         run: |
@@ -252,11 +249,10 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-results
           path: integration-results/
-          if-no-files-found: warn
 
   # --------------------------------------------------------------------------
   # Stage 4a: Build the C# CLI (AOT, multi-arch via buildx). amd64 host,
@@ -275,7 +271,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute image refs
         id: refs
@@ -293,7 +289,7 @@ jobs:
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -303,12 +299,12 @@ jobs:
       # native binary) and runs both archs in parallel via the
       # docker-container driver. No QEMU, no binfmt, no arm64 host queue.
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver-opts: image=moby/buildkit:v0.18.0
 
       - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.publish
@@ -345,7 +341,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Compute image refs
         id: refs
@@ -366,19 +362,19 @@ jobs:
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver-opts: image=moby/buildkit:v0.18.0
 
       - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/postgres/Dockerfile
@@ -410,7 +406,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build ephemeral test image (amd64)
         run: |
@@ -449,7 +445,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build ephemeral test image (amd64)
         run: |
