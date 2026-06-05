@@ -84,7 +84,7 @@ public sealed class WikiRepositoryTests : IAsyncLifetime
             await using (var conn = new NpgsqlConnection(raw))
             {
                 await conn.OpenAsync();
-                foreach (var ext in new[] { "vector", "postgis", "pg_trgm", "ltree" })
+                foreach (var ext in new[] { "vector", "pg_trgm", "ltree" })
                 {
                     await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
                     await extCmd.ExecuteNonQueryAsync();

@@ -31,7 +31,7 @@ invisible to the dispatcher and dashboard.
 
 ```
 ┌─────────────────────┐  HERMES_PG_CONN_STR  ┌──────────────────────────┐
-│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 6 exts    │
+│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 5 exts    │
 │  (NativeAOT binary) │                      │  ┌──────────────────┐    │
 │                     │                      │  │ hermes_template  │    │
 │  --mcp   (stdio)    │                      │  └────────┬─────────┘    │
@@ -67,7 +67,7 @@ docker run -d --name hermes-pg \
     -v pgdata:/var/lib/postgresql/data \
     ghcr.io/skb50bd/hermes-postgres:18
 
-# 3. Initialize: creates hermes_template (5 schemas, 6 extensions) +
+# 3. Initialize: creates hermes_template (5 schemas, 5 extensions) +
 #    hermes_cron (pg_cron with 2 jobs).
 docker exec hermes-pg /usr/local/bin/hermes-init.sh
 
@@ -76,7 +76,7 @@ docker exec hermes-pg psql -U postgres -c "CREATE DATABASE hermes_work TEMPLATE 
 
 # 5. Connect and use
 export HERMES_PG_CONN_STR='postgresql://postgres:***@localhost:5432/hermes_work'
-psql -c "SELECT count(*) FROM pg_extension;"      # 7 (6 + plpgsql)
+psql -c "SELECT count(*) FROM pg_extension;"      # 6 (5 + plpgsql)
 psql -c "SELECT schemaname, count(*) FROM pg_tables
          WHERE schemaname LIKE 'hermes_%' OR schemaname='agent_memory'
          GROUP BY schemaname;"
@@ -86,11 +86,11 @@ psql -c "SELECT schemaname, count(*) FROM pg_tables
 
 ```
 ┌─────────────────────┐  HERMES_PG_CONN_STR  ┌──────────────────────────┐
-│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 6 exts    │
+│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 5 exts    │
 │  (NativeAOT binary) │                      │  ┌──────────────────┐    │
 │                     │                      │  │ hermes_template  │    │
 │  --mcp   (stdio)    │                      │  │ (5 schemas,      │    │
-│  preflight          │                      │  │  6 extensions)   │    │
+│  preflight          │                      │  │  5 extensions)   │    │
 │  migrate            │                      │  └────────┬─────────┘    │
 │  profile create     │                      │           │ clone        │
 │  embed              │                      │  ┌────────▼─────────┐    │

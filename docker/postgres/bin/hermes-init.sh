@@ -2,7 +2,7 @@
 #
 # /usr/local/bin/hermes-init.sh
 # Bundled in the image. Idempotent. Initializes the hermes_template DB
-# with the 6 extensions and 5 schemas. Run once after first boot:
+# with the 5 extensions and 5 schemas. Run once after first boot:
 #
 #   docker exec <pg-container> /usr/local/bin/hermes-init.sh
 #
@@ -33,7 +33,7 @@ else
     echo "[hermes-init] Database $DB already exists, skipping create."
 fi
 
-# Install the 6 extensions (minus pg_cron — it lives in hermes_cron)
+# Install the 5 extensions (minus pg_cron — it lives in hermes_cron)
 echo "[hermes-init] Installing extensions..."
 # pg_cron would pin a worker connection to this DB, blocking future
 # `CREATE DATABASE ... TEMPLATE hermes_template` clones. It is installed
@@ -42,7 +42,6 @@ psql -U "$POSTGRES_USER" -d "$DB" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS ltree;          -- hierarchical categories (PG 18+ moved this to an extension)
-CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE EXTENSION IF NOT EXISTS age;
 SQL

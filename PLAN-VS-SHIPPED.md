@@ -6,8 +6,8 @@ for future sessions picking this up cold.
 ## What worked first try
 
 - `pgvector/pgvector:pg18` base image — no surprises
-- All 6 extensions installable from PGDG apt (postgis-3, cron, timescaledb, age, pg_trgm, ltree)
-- pgvector, pg_trgm, postgis, timescaledb, age — install in one shot via `CREATE EXTENSION IF NOT EXISTS`
+- All 5 extensions installable from PGDG apt (cron, timescaledb, age, pg_trgm, ltree)
+- pgvector, pg_trgm, timescaledb, age — install in one shot via `CREATE EXTENSION IF NOT EXISTS`
 - `create_hypertable()` for metrics
 - HNSW indexes for vector_768/1024/1536 in agent_memory + vector_1024 in hermes_wiki
 - FTS indexes on memory content_tsv + wiki body_tsv + journal messages content_tsv
@@ -45,7 +45,7 @@ retention, use a plain `DELETE FROM hermes_metrics.events WHERE ts <
 
 `/docker-entrypoint-initdb.d/*.sql` is replayed during the entrypoint's
 first-boot init **in the template1 context**. The superuser-only
-extensions (postgis, timescaledb, age) refuse to install there. Fix:
+extensions (timescaledb, age) refuse to install there. Fix:
 moved all setup out of initdb.d/ into a one-shot `hermes-init.sh` that
 the user runs manually with `docker exec`. Bundled the SQL at
 `/usr/local/share/hermes/01-schemas.sql` inside the image.

@@ -1,7 +1,7 @@
 # Compose file for the Hermes Agent platform.
 #
 # Deploys a single Postgres 18 instance (the hermes-postgres image built
-# in CI and published to GHCR) with all 6 extensions preinstalled and
+# in CI and published to GHCR) with all 5 extensions preinstalled and
 # the hermes-init.sh script bundled for first-boot schema setup.
 #
 # Usage:

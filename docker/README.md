@@ -8,7 +8,6 @@ Custom PostgreSQL image for the Hermes Agent platform. Extends
 | `vector` (pgvector) | `hermes_template` + every profile | Embeddings for memory, wiki, skill search |
 | `pg_trgm` | same | Trigram similarity for fuzzy matching |
 | `ltree` | same | Hierarchical categories (`projects.sportsverse`) |
-| `postgis` | same | Geospatial queries (skill metadata, location-aware agents) |
 | `timescaledb` | same | Operational metrics hypertables |
 | `age` | same | Apache AGE graph database (Cypher, opt-in) |
 | `pg_cron` | **`hermes_cron` only** | Scheduled jobs (lives in its own DB so it doesn't block profile clones) |
@@ -56,7 +55,7 @@ docker run -d --name hermes-pg \
     -v pgdata:/var/lib/postgresql/data \
     hermes-postgres:dev
 
-# One-shot installer: creates hermes_template (5 schemas, 6 extensions)
+# One-shot installer: creates hermes_template (5 schemas, 5 extensions)
 # and hermes_cron (pg_cron + 2 scheduled jobs).
 docker exec hermes-pg /usr/local/bin/hermes-init.sh
 
@@ -76,7 +75,7 @@ hermes-memory profile list
 
 The official Postgres Docker image's `/docker-entrypoint-initdb.d/`
 replays scripts in the **template1** context, where most extensions
-(`postgis`, `timescaledb`, `age`) refuse to install because they
+(`timescaledb`, `age`) refuse to install because they
 require superuser CREATE privileges only available in a real DB. So
 the schema SQL is **not** in `initdb.d/` — it's bundled at
 `/usr/local/share/hermes/01-schemas.sql` and applied by
@@ -96,7 +95,7 @@ docker/postgres/
 ## Verified
 
 - amd64 + arm64 builds (QEMU-emulated on amd64 host)
-- 6 extensions installable via `hermes-init.sh`
+- 5 extensions installable via `hermes-init.sh`
 - 5 schemas + all indexes (4 HNSW, multiple GIN, ltree GIST, FTS)
 - `CREATE DATABASE ... TEMPLATE hermes_template` succeeds
 - 2-hop recursive CTE over wiki document_links

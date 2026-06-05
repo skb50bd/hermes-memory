@@ -108,13 +108,13 @@ if ! docker ps --format '{{.Names}}' | grep -qx "${PG_CONTAINER}"; then
 fi
 
 # Image sanity check — refuse to operate on stock pgvector because it
-# lacks the postgis/timescaledb/age extensions the hermes_template
-# migration expects.
+# lacks the timescaledb/age extensions the hermes_template migration
+# expects.
 image_name=$(docker inspect "${PG_CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null || echo "")
 if [[ "${image_name}" != hermes-postgres* ]] && [[ "${image_name}" != ghcr.io/skb50bd/hermes-memory/hermes-postgres* ]]; then
     die "container '${PG_CONTAINER}' is using image '${image_name}', which is not the hermes-postgres image built in CI.
   Run the hermes-postgres container instead. The bootstrap needs the
-  extensions (postgis, timescaledb, age) bundled into the hermes-postgres image.
+  extensions (timescaledb, age) bundled into the hermes-postgres image.
   Suggested override:
     HERMES_PG_CONTAINER=hermes-postgres  # or the actual container name"
 fi
@@ -189,16 +189,16 @@ if [[ "${exists}" != "1" ]]; then
     pg_exec -d postgres -c "CREATE DATABASE ${TEMPLATE_DB}" >/dev/null
 fi
 
-# Enable the 6 extensions that don't require server-level config first.
+# Enable the 5 extensions that don't require server-level config first.
 # pg_cron is intentionally skipped here — it requires `cron.database_name`
 # in postgresql.conf and is added to a dedicated `hermes_cron` DB by
 # migration 0009_observability.sql (which knows how to wire it up).
 log "enabling required extensions in ${TEMPLATE_DB}"
-for ext in vector postgis timescaledb age pg_trgm ltree; do
+for ext in vector timescaledb age pg_trgm ltree; do
     pg_exec -d "${TEMPLATE_DB}" -c "CREATE EXTENSION IF NOT EXISTS ${ext}" >/dev/null \
         || die "failed to enable extension ${ext}"
 done
-log "  enabled: vector, postgis, timescaledb, age, pg_trgm, ltree"
+log "  enabled: vector, timescaledb, age, pg_trgm, ltree"
 
 log "applying schema to ${TEMPLATE_DB} (using migrations bundled in image at /usr/local/share/hermes/01-schemas.sql)"
 if [[ "${DRY_RUN}" == "1" ]]; then

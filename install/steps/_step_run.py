@@ -374,7 +374,7 @@ def drop_db(name: str, container: str = "hermes-postgres") -> bool:
 def extensions_available(container: str = "hermes-postgres") -> list[str]:
     r = pg_exec(
         "SELECT name FROM pg_available_extensions WHERE name IN "
-        "('vector','postgis','timescaledb','age','pg_cron','pg_trgm')",
+        "('vector','timescaledb','age','pg_cron','pg_trgm')",
         container=container,
     )
     return [x.strip() for x in r.splitlines() if x.strip()]
@@ -624,7 +624,7 @@ def step_extensions(wiz: Wizard):
         fail("Container not running. Run step 1 first.")
     available = extensions_available()
     info("Extensions live in hermes_template DB. Verifying availability files…")
-    required = ["vector", "postgis", "timescaledb", "age", "pg_cron", "pg_trgm"]
+    required = ["vector", "timescaledb", "age", "pg_cron", "pg_trgm"]
     for ext in required:
         if ext in available:
             ok(f"  {ext} (available for CREATE EXTENSION)")

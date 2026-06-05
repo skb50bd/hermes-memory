@@ -40,7 +40,7 @@ public static class PreflightHandler
         await conn2.OpenAsync();
 
         // 2-7. Required extensions
-        foreach (var ext in new[] { "vector", "pg_trgm", "postgis", "pg_cron", "timescaledb", "age" })
+        foreach (var ext in new[] { "vector", "pg_trgm", "pg_cron", "timescaledb", "age" })
         {
             try
             {

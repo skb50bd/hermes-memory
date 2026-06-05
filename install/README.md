@@ -37,7 +37,7 @@ hermes-memory --help            # see all subcommands
 |----|-----------------|-----------------------------------------------------------------------------|
 | 0  | preflight       | Detect docker, compose v2, hermes CLI, repo, ports, internet                |
 | 1  | postgres        | Start the self-hosted Postgres container (or detect already-up)             |
-| 2  | extensions      | Verify vector / postgis / timescaledb / age / pg_cron / pg_trgm installed   |
+| 2  | extensions      | Verify vector / timescaledb / age / pg_cron / pg_trgm installed   |
 | 3  | template        | Create `hermes_template` from the schema migrations                         |
 | 4  | profiles        | Create per-agent profile DBs (e.g. `hermes_default`) cloned from template   |
 | 5  | dsn             | Resolve DSN (password from env, compose, or prompt) and write to test dir   |

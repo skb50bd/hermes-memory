@@ -93,7 +93,7 @@ public sealed class KanbanRepositoryTests : IAsyncLifetime
                 // The testcontainer image is a vanilla postgres with the extensions
                 // AVAILABLE but not installed. Install them before running the
                 // migration SQL, which expects them to be present.
-                foreach (var ext in new[] { "vector", "postgis", "pg_trgm", "ltree" })
+                foreach (var ext in new[] { "vector", "pg_trgm", "ltree" })
                 {
                     await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
                     await extCmd.ExecuteNonQueryAsync();
