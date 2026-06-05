@@ -38,7 +38,7 @@ import sys as _sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in _sys.path:
     _sys.path.insert(0, _HERE)
-from embedder import (  # noqa: E402
+from embedder import (  # noqa: E402, F401
     Embedder, EmbeddingError, SUPPORTED_DIMS, DEFAULT_DIM,
     get_embedder, reset_embedder, get_all_embedders,
 )
@@ -889,16 +889,39 @@ class PostgresMemoryProvider(MemoryProvider):
             for r in cur.fetchall():
                 cat = r[0] or "(none)"
                 by_category[str(cat)] = r[1]
+            # Read per-dim model config directly from the SQL registry. This
+            # is the source of truth — the live embedder instance may have
+            # hard-coded fallback defaults that don't match the registry if
+            # the env hasn't been loaded yet.
+            cur.execute(
+                "SELECT dim, provider, model, base_url, api_key_env "
+                "FROM agent_memory.models ORDER BY dim"
+            )
+            models_rows = cur.fetchall()
         per_dim = self._client.count_by_dim()
+        # Build the embedder_info dict: prefer SQL registry for provider/model,
+        # augment with embedder stats (hits/misses/errors) when the live
+        # embedder can be constructed.
         embedder_info: Dict[str, Any] = {}
+        models_by_dim: Dict[int, Any] = {
+            int(row[0]): {
+                "provider": row[1],
+                "model": row[2],
+                "base_url": row[3],
+                "api_key_env": row[4],
+            }
+            for row in models_rows
+        }
         for d in SUPPORTED_DIMS:
+            info = dict(models_by_dim.get(d, {}))
             try:
                 e = get_embedder(d)
-                embedder_info[str(d)] = {
-                    "provider": e.provider, "model": e.model, "stats": e.stats(),
-                }
+                info["stats"] = e.stats()
             except Exception as exc:
-                embedder_info[str(d)] = {"error": str(exc)}
+                # If the embedder can't be built (e.g. missing API key),
+                # still show the configured provider/model from the registry.
+                info["stats_error"] = str(exc)
+            embedder_info[str(d)] = info
         return json.dumps({
             "status": "connected",
             "host": display,

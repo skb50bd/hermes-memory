@@ -482,12 +482,16 @@ def _default_model_config_for_dim(dim: int) -> dict:
             "cache_dir": cache_dir,
         }
     if dim == 1024:
+        # 1024-dim is the production default. Use the local Ollama instance
+        # (10.49.0.52:11434) with bge-m3, which produces high-quality 1024-dim
+        # embeddings. The previous kimi default was a transient bridge while
+        # Kimi credentials were valid — Kimi keys are now retired.
         return {
             "dim": 1024,
-            "provider": os.environ.get("HERMES_EMBED_PROVIDER_1024", "kimi"),
-            "model": os.environ.get("HERMES_EMBED_MODEL_1024", "bge_m3_embed"),
-            "api_key": _resolve_api_key(1024, "kimi"),
-            "base_url": os.environ.get("HERMES_EMBED_BASE_URL_1024", ""),
+            "provider": os.environ.get("HERMES_EMBED_PROVIDER_1024", "ollama_local"),
+            "model": os.environ.get("HERMES_EMBED_MODEL_1024", "bge-m3"),
+            "api_key": _resolve_api_key(1024, "ollama_local"),
+            "base_url": os.environ.get("HERMES_EMBED_BASE_URL_1024", "http://10.49.0.52:11434"),
             "cache_dir": cache_dir,
         }
     if dim == 1536:

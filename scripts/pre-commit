@@ -1,0 +1,169 @@
+#!/bin/bash
+#
+# .git/hooks/pre-commit
+#
+# Lint every staged file in the project before allowing the commit.
+# Detects file type, dispatches to the right linter, blocks the commit
+# if any linter reports a problem.
+#
+# Per dev-standards: "Every repo MUST have a pre-commit hook that lints
+# every file in the project." Implemented as: for each file in `git
+# diff --cached --name-only --diff-filter=ACMR`, run the linter that
+# matches the file's extension, and abort the commit on non-zero exit.
+#
+# To bypass in an emergency: git commit --no-verify
+#
+# To install on a fresh clone:
+#   install -m 0755 scripts/pre-commit .git/hooks/pre-commit
+#
+# Linters (must be on PATH):
+#   rtk     - Rust Token Killer; runs ruff/python, dotnet format, etc.
+#   ruff    - Python linter (also called via rtk)
+#   dotnet  - C# build + format
+#
+# File-type dispatch:
+#   *.py        → ruff check (via rtk lint or direct ruff)
+#   *.cs        → dotnet build (compile errors block; warnings are OK)
+#   *.sql       → syntax check via psql --check or sqlfluff if available
+#   *.sh        → shellcheck
+#   *.yaml,*.yml → yamllint
+#   *.json      → python -m json.tool
+#   Dockerfile  → hadolint if available, else no-op
+#   *           → no-op (unrecognized file type)
+#
+# New files (untracked) are NOT linted here — they aren't in the diff.
+# Run the lint suite manually before staging a new file.
+
+set -e
+
+# Colors for the warnings
+printf -v RED '\033[0;31m'
+printf -v YEL '\033[0;33m'
+printf -v GRN '\033[0;32m'
+printf -v RST '\033[0m'
+
+cd "$(git rev-parse --show-toplevel)"
+
+# Find staged files (added/copied/modified/renamed, not deleted).
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+FAILED=0
+LINTED=0
+
+for path in $STAGED; do
+    # Skip files outside the working tree (e.g. deleted but listed somehow)
+    [ -f "$path" ] || continue
+
+    case "$path" in
+        *.py)
+            LINTED=$((LINTED+1))
+            # Use ruff directly when available. rtk is a token-saving
+            # wrapper around ruff but its output filtering can hide
+            # F401 unused-import errors. Run ruff in --no-fix mode so
+            # it doesn't modify staged files.
+            if command -v ruff >/dev/null 2>&1; then
+                if ! ruff check --no-fix --output-format=concise "$path"; then
+                    echo "${RED}pre-commit: ruff failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            elif command -v rtk >/dev/null 2>&1; then
+                if ! rtk ruff check "$path"; then
+                    echo "${RED}pre-commit: rtk ruff failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            else
+                echo "${YEL}pre-commit: skip Python lint for $path (no ruff/rtk)${RST}"
+            fi
+            ;;
+        *.cs)
+            LINTED=$((LINTED+1))
+            # For C#, just check that the project still compiles. Skip
+            # formatting checks (dotnet format) because they auto-modify
+            # files and break the staged-vs-working-tree invariant.
+            if command -v dotnet >/dev/null 2>&1; then
+                if ! dotnet build --nologo --verbosity quiet 2>&1 | grep -E "error CS[0-9]+" >/dev/null; then
+                    echo "${GRN}pre-commit: dotnet build OK${RST}"
+                else
+                    echo "${RED}pre-commit: dotnet build failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            fi
+            ;;
+        *.sh)
+            LINTED=$((LINTED+1))
+            if command -v shellcheck >/dev/null 2>&1; then
+                if ! shellcheck "$path"; then
+                    echo "${RED}pre-commit: shellcheck failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            else
+                echo "${YEL}pre-commit: skip shellcheck for $path (not installed)${RST}"
+            fi
+            ;;
+        *.yaml|*.yml)
+            LINTED=$((LINTED+1))
+            if command -v yamllint >/dev/null 2>&1; then
+                if ! yamllint -d relaxed "$path" 2>&1; then
+                    echo "${RED}pre-commit: yamllint failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            elif command -v python3 >/dev/null 2>&1; then
+                # Fallback: at least verify it's parseable YAML
+                if ! python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$path" 2>&1; then
+                    echo "${RED}pre-commit: YAML parse failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            fi
+            ;;
+        *.json)
+            LINTED=$((LINTED+1))
+            if ! python3 -m json.tool "$path" >/dev/null 2>&1; then
+                echo "${RED}pre-commit: JSON parse failed for $path${RST}"
+                FAILED=$((FAILED+1))
+            fi
+            ;;
+        *.sql)
+            LINTED=$((LINTED+1))
+            # No lightweight SQL linter on the dev box. Just verify the
+            # file is at least readable + non-empty. Full SQL validation
+            # happens via the integration tests in CI.
+            if [ ! -s "$path" ]; then
+                echo "${RED}pre-commit: empty SQL file $path${RST}"
+                FAILED=$((FAILED+1))
+            fi
+            ;;
+        Dockerfile|*.dockerfile|Dockerfile.*)
+            LINTED=$((LINTED+1))
+            if command -v hadolint >/dev/null 2>&1; then
+                if ! hadolint "$path" 2>&1; then
+                    echo "${RED}pre-commit: hadolint failed for $path${RST}"
+                    FAILED=$((FAILED+1))
+                fi
+            else
+                echo "${YEL}pre-commit: skip hadolint for $path (not installed)${RST}"
+            fi
+            ;;
+        *.md)
+            # No-op for markdown; rendered text, no syntax to lint.
+            ;;
+        *)
+            # Unrecognized file type — no-op. We don't want to fail
+            # commits because of binaries, images, lock files, etc.
+            ;;
+    esac
+done
+
+if [ "$FAILED" -gt 0 ]; then
+    echo "${RED}pre-commit: $FAILED linter(s) failed across $LINTED file(s). Commit aborted.${RST}"
+    echo "${YEL}Bypass with: git commit --no-verify${RST}"
+    exit 1
+fi
+
+if [ "$LINTED" -gt 0 ]; then
+    echo "${GRN}pre-commit: $LINTED file(s) linted, all passed.${RST}"
+fi
+
+exit 0

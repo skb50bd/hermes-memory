@@ -37,10 +37,15 @@ CREATE TABLE IF NOT EXISTS agent_memory.models (
     base_url     text,
     api_key_env  text
 );
+-- Default embedders (post-postgis-drop era, see commit 73beca9 + dbb6127).
+-- 768/1024 use the local Ollama instance at 10.49.0.52:11434. 1536
+-- points at OpenAI as a dormant placeholder — the dim is unused until
+-- OPENAI_API_KEY is set, then the user can flip it via
+-- `hermes-memory model-set --dim 1536`.
 INSERT INTO agent_memory.models (dim, provider, model, base_url, api_key_env) VALUES
-    (768,  'ollama_local', 'nomic-embed-text',    NULL, 'OLLAMA_API_KEY'),
-    (1024, 'kimi',         'bge_m3_embed',        NULL, 'KIMI_API_KEY'),
-    (1536, 'kimi',         'bge_m3_embed',        NULL, 'KIMI_API_KEY')
+    (768,  'ollama_local', 'nomic-embed-text-v2-moe', 'http://10.49.0.52:11434', NULL),
+    (1024, 'ollama_local', 'bge-m3',                 'http://10.49.0.52:11434', NULL),
+    (1536, 'openai',       'text-embedding-3-small', 'https://api.openai.com/v1', 'OPENAI_API_KEY')
 ON CONFLICT (dim) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS agent_memory.settings (

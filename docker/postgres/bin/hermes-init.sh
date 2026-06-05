@@ -15,8 +15,6 @@ DB="${HERMES_TEMPLATE_DB:-hermes_template}"
 
 echo "[hermes-init] Target database: $DB"
 
-echo "[hermes-init] Target database: $DB"
-
 # Wait for postgres to be ready
 until pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     echo "[hermes-init] Waiting for postgres..."

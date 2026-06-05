@@ -89,12 +89,27 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Hermes scripts + schema files
+COPY --chown=root:root docker/postgres/bin/hermes-postgres-entrypoint.sh /usr/local/bin/hermes-postgres-entrypoint.sh
 COPY --chown=root:root docker/postgres/bin/hermes-init.sh /usr/local/bin/hermes-init.sh
 COPY --chown=root:root docker/postgres/bin/hermes-cron.sh /usr/local/bin/hermes-cron.sh
 COPY --chown=root:root docker/postgres/bin/01-schemas.sql  /usr/local/share/hermes/01-schemas.sql
+# Migrations must be world-readable so the postgres user (uid 999) can
+# apply them via psql -f. COPY default perms are 600 root:root, which
+# the postgres user cannot read. chmod after COPY to fix this.
 COPY --chown=root:root migrations                         /usr/migrations
-RUN chmod 0755 /usr/local/bin/hermes-init.sh /usr/local/bin/hermes-cron.sh \
-    && chmod 0644 /usr/local/share/hermes/01-schemas.sql
+RUN chmod 0755 /usr/local/bin/hermes-postgres-entrypoint.sh \
+               /usr/local/bin/hermes-init.sh \
+               /usr/local/bin/hermes-cron.sh \
+    && chmod 0644 /usr/local/share/hermes/01-schemas.sql \
+                   /usr/migrations/*.sql
+
+# Use the Hermes entrypoint wrapper that runs hermes-init.sh + hermes-cron.sh
+# idempotently on every container start. The upstream pgvector entrypoint
+# only runs /docker-entrypoint-initdb.d/ scripts on first `initdb`, which
+# breaks pre-initialized volumes that were started before the init scripts
+# were added (live `hermes-postgres-data`, restored backups, etc.).
+ENTRYPOINT ["/usr/local/bin/hermes-postgres-entrypoint.sh"]
+CMD ["postgres"]
 
 # postgresql.conf tunables (order matters: shared_preload_libraries must list
 # pg_cron, timescaledb, age in that order — pg_cron registers workers first,
