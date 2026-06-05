@@ -327,16 +327,17 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.refs.outputs.tag }}
-          # GHA build cache. Re-enabled per user request. The original
-          # commit 39b9ab2 disabled it because the `cache-to` backend was
-          # returning 400 errors ("Our services aren't available right
-          # now") intermittently during a Docker Hub outage. `cache-from`
-          # is read-only and does NOT depend on that backend — it's served
-          # by GHA's own cache (separate from Docker Hub). `cache-to`
-          # writes to GHA's cache (also separate) so we re-enable both.
-          # If a future outage hits GHA's cache, comment these out.
+          # GHA build cache. Read-only cache-from only (no cache-to).
+          # Re-enabling cache-to per user request hit the same 400 error
+          # documented in commit 39b9ab2 ("Our services aren't available
+          # right now" from the GHA cache backend). Confirmed this is the
+          # GHA cache, not Docker Hub — the failure occurs at the
+          # `exporting to GitHub Actions Cache` step with a `0IkQj...`
+          # response. Keeping cache-from (read-only, never fatal on
+          # miss) gives us the speedup on PRs without the write-path
+          # flake on main. If GHA's cache stabilizes, re-add
+          # `cache-to: type=gha,mode=max`.
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   # --------------------------------------------------------------------------
   # Stage 4b: Build the Postgres image (multi-arch via buildx).
@@ -404,7 +405,6 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.refs.outputs.tag }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   # --------------------------------------------------------------------------
   # Stage 5a: Smoke-test the binary (extract from multi-arch image, amd64 only).
