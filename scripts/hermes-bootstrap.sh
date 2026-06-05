@@ -267,6 +267,31 @@ create_profile_role_and_db() {
     pg_exec -d postgres -c "CREATE DATABASE ${db_name} TEMPLATE ${TEMPLATE_DB} OWNER ${role_name} CONNECTION LIMIT 20" >/dev/null \
         || die "failed to clone ${TEMPLATE_DB} → ${db_name}"
 
+    # Grant the per-profile role read/write access to the application
+    # schemas cloned from the template. Without this, the role owns the
+    # DB but can't see the tables/sequences in agent_memory, hermes_*,
+    # etc. (those schemas were created by the superuser in the template).
+    # We grant ALL on every schema + every existing object, plus set
+    # default privileges so future ALTER TABLE inside this DB also
+    # defaults to granting the per-profile role.
+    log "  ${role_name}: granting schema/object privileges in ${db_name}"
+    for schema in agent_memory hermes_journal hermes_kanban hermes_metrics hermes_observability hermes_sessions hermes_skills hermes_wiki; do
+        pg_exec -d "${db_name}" -c "GRANT ALL ON SCHEMA ${schema} TO ${role_name}" >/dev/null 2>&1 || true
+        pg_exec -d "${db_name}" -c "GRANT ALL ON ALL TABLES IN SCHEMA ${schema} TO ${role_name}" >/dev/null 2>&1 || true
+        pg_exec -d "${db_name}" -c "GRANT ALL ON ALL SEQUENCES IN SCHEMA ${schema} TO ${role_name}" >/dev/null 2>&1 || true
+        pg_exec -d "${db_name}" -c "GRANT ALL ON ALL FUNCTIONS IN SCHEMA ${schema} TO ${role_name}" >/dev/null 2>&1 || true
+    done
+    # Default privileges: any future table/sequence/function created in
+    # these schemas (by migrations or by the superuser) is auto-granted
+    # to the per-profile role.
+    pg_exec -d "${db_name}" -c "ALTER DEFAULT PRIVILEGES FOR ROLE ${PG_USER} IN SCHEMA agent_memory GRANT ALL ON TABLES TO ${role_name}" >/dev/null 2>&1 || true
+    pg_exec -d "${db_name}" -c "ALTER DEFAULT PRIVILEGES FOR ROLE ${PG_USER} IN SCHEMA agent_memory GRANT ALL ON SEQUENCES TO ${role_name}" >/dev/null 2>&1 || true
+    for schema in hermes_journal hermes_kanban hermes_metrics hermes_observability hermes_sessions hermes_skills hermes_wiki; do
+        pg_exec -d "${db_name}" -c "ALTER DEFAULT PRIVILEGES FOR ROLE ${PG_USER} IN SCHEMA ${schema} GRANT ALL ON TABLES TO ${role_name}" >/dev/null 2>&1 || true
+        pg_exec -d "${db_name}" -c "ALTER DEFAULT PRIVILEGES FOR ROLE ${PG_USER} IN SCHEMA ${schema} GRANT ALL ON SEQUENCES TO ${role_name}" >/dev/null 2>&1 || true
+    done
+    log "  ${role_name}: granted privileges on 8 schemas + default privileges"
+
     # Hand back the per-profile DSN info via stdout.
     # Format: db_name|role_pw
     printf '%s|%s\n' "${db_name}" "${role_pw}"
