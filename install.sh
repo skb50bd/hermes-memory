@@ -74,15 +74,13 @@ STEPS=(00_preflight 10_postgres 20_extensions 30_template 40_profiles \
 
 if [[ "$MODE" == "uninstall" ]]; then
     echo "=== uninstall: running steps in reverse ==="
-    for s in $(printf '%s\n' "${STEPS[@]}" | tac); do
-        n="${s%%_*}"
-        echo "── $n ──"
-        HERMES_STEP="$n" HERMES_INSTALL_MODE="uninstall" bash "$STEPS_DIR/_dispatch.sh" || {
-            echo "step $n failed — continuing in reverse" >&2
-        }
-    done
-    echo "=== uninstall complete ==="
-    exit 0
+    # _step_run.py is the orchestrator for uninstall — it iterates
+    # REVERSE_STEPS in reverse step order. The per-step shims are
+    # install-path only; calling them would duplicate work.
+    export HERMES_STEP=""
+    export HERMES_INSTALL_MODE="uninstall"
+    export HERMES_REPO_ROOT="$REPO_ROOT"
+    exec python3 "$STEPS_DIR/_step_run.py"
 fi
 
 # install / check: run forward, optionally skipping completed steps

@@ -735,7 +735,31 @@ def step_embedder(wiz: Wizard):
     # overrides; falls back to old 11434 if explicitly set, otherwise 16434.
     ollama_port = os.environ.get("HERMES_OLLAMA_HOST_PORT", "16434")
     if provider == "ollama_local":
-        base_url: str = f"http://127.0.0.1:{ollama_port}"
+        # Allow the user to point at a remote Ollama host (the local
+        # machine isn't always the one running embeddings). The default
+        # is 127.0.0.1:16434. The user may have already set
+        # HERMES_OLLAMA_BASE_URL via the environment to skip this prompt.
+        env_base = os.environ.get("HERMES_OLLAMA_BASE_URL", "").strip()
+        if env_base:
+            base_url = env_base
+            ok(f"Using HERMES_OLLAMA_BASE_URL from env: {base_url}")
+        else:
+            host_pick = select(
+                "Ollama host",
+                [
+                    f"http://127.0.0.1:{ollama_port}   (local Ollama on this host)",
+                    f"http://10.49.0.52:11434          (low-powered remote Ollama — embeddings only)",
+                    "custom…                          (you'll type the host:port)",
+                ],
+                default_index=0,
+            )
+            if "10.49.0.52" in host_pick:
+                base_url = "http://10.49.0.52:11434"
+            elif "custom" in host_pick:
+                custom = input("  Ollama base URL (e.g. http://host:11434): ").strip()
+                base_url = custom or f"http://127.0.0.1:{ollama_port}"
+            else:
+                base_url = f"http://127.0.0.1:{ollama_port}"
     elif provider == "kimi":
         base_url = "https://api.kimi.com/coding/v1"
         api_key_env = KIMI_KEY_NAME

@@ -22,7 +22,7 @@ stdio MCP, NativeAOT.
 | **Metrics** | `hermes_metrics.events` (timescaledb hypertable) | `metrics_record`, `metrics_query` |
 | **Kanban** | `hermes_kanban.tasks` + 9 related tables (tenants, task_runs, task_events, task_links, task_comments, task_attachments, tags, task_tags, notify_subs) | 17 tools: `kanban_create`, `kanban_list`, `kanban_get`, `kanban_claim`, `kanban_heartbeat`, `kanban_complete`, `kanban_fail`, `kanban_comment`, `kanban_history`, `kanban_link`, `kanban_children`, `kanban_parents`, `kanban_tenants`, `kanban_tenant_create`, `kanban_subscribe`, `kanban_unsubscribe`, `kanban_search` |
 
-The Python plugin at `~/repos/hermes-postgres-memory/plugins/kanban/postgres/`
+The Python plugin at `~/repos/hermes-memory/plugins/kanban/postgres/`
 ships the runtime now. The C# binary is the long-term path but doesn't
 ship yet. The thin shim at `hermes_cli/kanban_db.py` makes the swap
 invisible to the dispatcher and dashboard.

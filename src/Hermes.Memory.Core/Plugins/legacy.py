@@ -1,5 +1,5 @@
 """
-Back-compat shim. Re-exports the same tool names the old hermes-postgres-memory
+Back-compat shim. Re-exports the same tool names the legacy postgres
 plugin exposed, so existing hermes-agent installations keep working while they
 migrate to calling the MCP server directly.
 

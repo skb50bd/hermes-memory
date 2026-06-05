@@ -87,9 +87,9 @@ public sealed class MetricsRepository
         cmd.Parameters.AddWithValue("bucket", TimeSpan.TryParse(bucket, out var bs) ? bs : TimeSpan.FromMinutes(1));
         cmd.Parameters.AddWithValue("from", from);
         cmd.Parameters.AddWithValue("to", to);
-        cmd.Parameters.AddWithValue("profile", (object?)profile ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("metric", (object?)metricName ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("n", topN);
+        cmd.Parameters.Add(new NpgsqlParameter("profile", NpgsqlDbType.Text) { Value = (object?)profile ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("metric", NpgsqlDbType.Text) { Value = (object?)metricName ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("n", NpgsqlDbType.Integer) { Value = topN });
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var results = new List<MetricAggregate>();
         while (await reader.ReadAsync(ct))

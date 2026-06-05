@@ -187,7 +187,7 @@ public sealed class WikiRepository
         await using var cmd = new NpgsqlCommand(
             """
             WITH fts_candidates AS (
-                SELECT id, slug, title, body_md,
+                SELECT id, slug, title, body_md, vector_1024,
                        ts_rank_cd(body_tsv, websearch_to_tsquery('english', @q)) AS text_rank
                 FROM hermes_wiki.documents
                 WHERE body_tsv @@ websearch_to_tsquery('english', @q)
@@ -195,9 +195,9 @@ public sealed class WikiRepository
                 LIMIT 200
             )
             SELECT slug, title, body_md, text_rank,
-                   1 - (vector_1024 <=> @qvec) AS vector_sim
+                   1 - (vector_1024 <=> @qvec::vector) AS vector_sim
             FROM fts_candidates
-            ORDER BY (text_rank + (1 - (vector_1024 <=> @qvec))) DESC
+            ORDER BY (text_rank + (1 - (vector_1024 <=> @qvec::vector))) DESC
             LIMIT @k
             """, conn);
         cmd.Parameters.AddWithValue("q", query);

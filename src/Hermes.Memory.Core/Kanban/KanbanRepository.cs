@@ -158,10 +158,10 @@ public sealed class KanbanRepository
             ORDER BY t.priority DESC, t.created_at DESC
             LIMIT @lim
             """, conn);
-        cmd.Parameters.AddWithValue("tenant", (object?)tenantSlug ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("status", (object?)status ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("assignee", (object?)assignee ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("lim", limit);
+        cmd.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Text) { Value = (object?)tenantSlug ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("status", NpgsqlDbType.Text) { Value = (object?)status ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("assignee", NpgsqlDbType.Text) { Value = (object?)assignee ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("lim", NpgsqlDbType.Integer) { Value = limit });
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var results = new List<KanbanTask>();
         while (await reader.ReadAsync(ct))
