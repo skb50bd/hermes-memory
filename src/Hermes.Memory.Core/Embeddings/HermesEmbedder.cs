@@ -175,7 +175,9 @@ public sealed class HermesEmbedder
     private static string DefaultBaseUrl(string provider) => provider switch
     {
         "kimi"         => "https://api.kimi.com/coding/v1",
-        "ollama_local" => "http://localhost:11434",
+        // Ollama local port: regular + 5000 = 16434. Override with
+        // HERMES_OLLAMA_HOST_PORT. Falls back to 11434 (legacy).
+        "ollama_local" => $"http://localhost:{ResolveOllamaPort()}",
         "openai"       => "https://api.openai.com/v1",
         // "noop" is a test/local provider that returns zero vectors without
         // hitting the network. It needs a non-null baseUrl only because the
@@ -184,6 +186,15 @@ public sealed class HermesEmbedder
         "noop"         => string.Empty,
         _ => throw new NotSupportedException($"No default base URL for provider '{provider}'")
     };
+
+    private static int ResolveOllamaPort()
+    {
+        // Convention: regular port + 5000 = 16434. HERMES_OLLAMA_HOST_PORT
+        // wins. Falls back to 11434 (legacy) for back-compat.
+        var raw = Environment.GetEnvironmentVariable("HERMES_OLLAMA_HOST_PORT");
+        if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var p)) return p;
+        return 11434;
+    }
 
     private string CacheKey(string text)
     {

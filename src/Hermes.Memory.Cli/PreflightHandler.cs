@@ -8,7 +8,7 @@ namespace Hermes.Memory.Cli;
 
 /// <summary>
 /// 16-check preflight. Reuses the same diagnostic shape as the
-/// hermes-postgres-memory plugin so existing operational knowledge
+/// hermes-memory plugin so existing operational knowledge
 /// transfers. Order matters: catalog → grants → data.
 /// </summary>
 public static class PreflightHandler

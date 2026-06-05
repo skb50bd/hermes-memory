@@ -87,7 +87,7 @@ fi
 SCHEMA_EXISTS=$(psql "$EXPLICIT_PG_MEM_DB_CONN_STR" -t -A -c \
     "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = '$HERMES_KANBAN_SCHEMA')")
 if [ "$SCHEMA_EXISTS" != "t" ]; then
-    _fail "Schema $HERMES_KANBAN_SCHEMA does not exist. Run the hermes-postgres-memory bootstrap to install it."
+    _fail "Schema $HERMES_KANBAN_SCHEMA does not exist. Run the hermes-memory kanban bootstrap to install it."
 fi
 
 # Check all 8 tables

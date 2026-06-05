@@ -101,7 +101,7 @@ def _row_needs_embedding(cur, column: str, dim: int, memory_id) -> bool:
     """A row 'needs embedding' if its target column is null, all-zero, or
     dim-mismatched."""
     cur.execute(
-        f"SELECT {column} FROM agent_memory WHERE id = %s",
+        f"SELECT {column} FROM agent_memory.memories WHERE id = %s",
         (memory_id,),
     )
     row = cur.fetchone()
@@ -132,8 +132,8 @@ def _iter_rows(conn, column: str, dim: int, batch_size: int) -> Iterator[List[Tu
         cur.execute(
             f"""
             SELECT id, content
-            FROM agent_memory
-            WHERE is_active = TRUE
+            FROM agent_memory.memories
+            WHERE deleted_at IS NULL
               AND ({column} IS NULL OR {column} = array_fill(0, ARRAY[%s])::vector)
             ORDER BY created_at ASC
             """,
@@ -228,7 +228,7 @@ def main() -> int:
                         continue
                     with conn.cursor() as cur:
                         cur.execute(
-                            f"UPDATE agent_memory SET {column} = %s::vector, "
+                            f"UPDATE agent_memory.memories SET {column} = %s::vector, "
                             f"updated_at = now() WHERE id = %s",
                             (vec, memory_id),
                         )

@@ -30,7 +30,13 @@ public sealed class HermesDataSource : IAsyncDisposable
     public HermesDataSource(string connectionString, ILogger<HermesDataSource> logger)
     {
         _logger = logger;
-        var builder = new NpgsqlDataSourceBuilder(connectionString);
+        // The C# binary accepts any of the three DSN forms (URI, libpq
+        // key=value, or ADO-style semicolon-separated). The Python plugin
+        // writes the URI form to PG_MEM_DB_CONN_STR. Npgsql can't parse
+        // the URI form, so we normalize first. See DsnNormalizer for the
+        // full set of accepted inputs.
+        var normalized = DsnNormalizer.ToNpgsql(connectionString);
+        var builder = new NpgsqlDataSourceBuilder(normalized);
         ConfigureDataSource(builder);
         _dataSource = builder.Build();
     }

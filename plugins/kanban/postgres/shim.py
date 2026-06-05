@@ -54,7 +54,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Re-export the plugin's storage layer. The plugin lives at
-# `plugins/kanban/postgres` inside the hermes-postgres-memory repo.
+# `plugins/kanban/postgres` inside the hermes-memory repo.
 # It is also installed under `~/.hermes/hermes-agent/plugins/kanban/postgres`
 # when the user runs install.sh. Try the editable location first
 # (so devs see changes immediately), then fall back to the installed copy.

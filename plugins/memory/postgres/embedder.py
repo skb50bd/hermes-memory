@@ -288,9 +288,16 @@ class Embedder:
             )
         if provider in ("ollama_cloud", "ollama_local"):
             return self._embed_ollama(text)
+        if provider == "openai":
+            return self._embed_openai_compat(
+                default_base="https://api.openai.com/v1",
+                path="/embeddings",
+                text_payload_key="input",
+                text_payload_value=text,
+            )
         raise EmbeddingError(
             f"Unknown embedding provider: {provider!r}. "
-            f"Set HERMES_EMBED_PROVIDER to one of: kimi, minimax, ollama_local, ollama_cloud, noop."
+            f"Set HERMES_EMBED_PROVIDER to one of: kimi, minimax, ollama_local, ollama_cloud, openai, noop."
         )
 
     def _embed_openai_compat(
@@ -350,7 +357,17 @@ class Embedder:
     def _embed_ollama(self, text: str) -> List[float]:
         base = self._cfg["base_url"]
         if not base:
-            base = "https://ollama.com" if self._cfg["provider"] == "ollama_cloud" else "http://localhost:11434"
+            # Convention: regular + 5000 = 16434. Override via env or
+            # HERMES_OLLAMA_USE_LEGACY_PORT=1 to fall back to 11434.
+            if self._cfg["provider"] == "ollama_cloud":
+                base = "https://ollama.com"
+            else:
+                port = os.environ.get("HERMES_OLLAMA_HOST_PORT")
+                if not port and os.environ.get("HERMES_OLLAMA_USE_LEGACY_PORT") == "1":
+                    port = "11434"
+                elif not port:
+                    port = "16434"
+                base = f"http://localhost:{port}"
         base = base.rstrip("/")
         url = f"{base}/api/embed"
         body = {"model": self._cfg["model"], "input": text}
@@ -499,6 +516,8 @@ def _resolve_api_key(dim: int, provider: str) -> str:
         return os.environ.get("MINIMAX_API_KEY", "").strip()
     if provider in ("ollama_cloud", "ollama_local"):
         return os.environ.get("OLLAMA_API_KEY", "").strip()
+    if provider == "openai":
+        return os.environ.get("OPENAI_API_KEY", "").strip()
     return ""
 
 

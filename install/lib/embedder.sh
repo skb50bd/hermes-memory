@@ -62,9 +62,19 @@ embedder::api_key_env() {
 }
 
 # embedder::default_base_url <provider>
+# Ollama local: HERMES_OLLAMA_HOST_PORT env var, default 16434 (11434+5000).
+# Falls back to legacy 11434 if HERMES_OLLAMA_USE_LEGACY_PORT=1.
 embedder::default_base_url() {
     case "$1" in
-        ollama_local) echo "http://127.0.0.1:11434" ;;
+        ollama_local)
+            local port="${HERMES_OLLAMA_HOST_PORT:-}"
+            if [[ -z "$port" && "${HERMES_OLLAMA_USE_LEGACY_PORT:-0}" == "1" ]]; then
+                port="11434"
+            elif [[ -z "$port" ]]; then
+                port="16434"
+            fi
+            echo "http://127.0.0.1:${port}"
+            ;;
         kimi)         echo "https://api.kimi.com/coding/v1" ;;
         openai)       echo "https://api.openai.com/v1" ;;
         *)            echo "" ;;

@@ -79,8 +79,112 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
 
 # ── Connection-string resolver ──────────────────────────────────────────
 
+# Three accepted forms for a Postgres connection string:
+#   1. URI form:        postgresql://user:pass@host:port/dbname[?param=...]
+#   2. Libpq key=value: host=... port=... dbname=... user=... password=...
+#   3. ADO-style:       Host=...;Port=...;Database=...;Username=...;Password=...
+#
+# - psycopg2 accepts all three natively.
+# - Npgsql (the .NET driver used by the C# hermes-memory binary) only
+#   accepts forms 2 and 3 — its connection-string parser chokes on
+#   the URI form. See NpgsqlDataSourceBuilder and the docs at
+#   https://www.npgsql.org/doc/connection-string-parameters.html.
+#
+# The DSNTranslator below produces BOTH a URI form (for psycopg2) and
+# a libpq key=value form (for Npgsql + libpq CLI tools) from any
+# accepted input. It also handles URL-encoded user/password (e.g.
+# `postgresql://user:p%40ss@host:5432/db` → password "p@ss"), which
+# a naive string split would mangle.
+
+
+def _percent_decode(s: str) -> str:
+    """Decode %XX percent-escapes; used for URI user/password components."""
+    if not s:
+        return s
+    try:
+        from urllib.parse import unquote
+        return unquote(s)
+    except Exception:
+        return s
+
+
+def _dsn_to_libpq(dsn: str) -> str:
+    """Convert any accepted DSN form to libpq-style `key=value` pairs.
+
+    Output: `host=... port=... dbname=... user=... password=...` (whitespace
+    separated, no quoting). Query-string params on URI form are ignored
+    (libpq doesn't have a standard set; sslmode and application_name are
+    the only two we actually use, and they round-trip through the ADO-form
+    translator below if present).
+    """
+    raw = (dsn or "").strip()
+    if not raw:
+        return raw
+
+    # URI form
+    if raw.startswith(("postgresql://", "postgres://")):
+        try:
+            from urllib.parse import urlparse
+            u = urlparse(raw)
+            host = u.hostname or "localhost"
+            port = str(u.port or 5432)
+            dbname = (u.path or "/").lstrip("/") or ""
+            user = _percent_decode(u.username or "")
+            password = _percent_decode(u.password or "")
+            parts = [f"host={host}", f"port={port}"]
+            if dbname:
+                parts.append(f"dbname={dbname}")
+            if user:
+                parts.append(f"user={user}")
+            if password:
+                parts.append(f"password={password}")
+            return " ".join(parts)
+        except Exception:
+            return raw  # give up; let the downstream parser complain
+
+    # ADO-style (semicolon-separated) → libpq
+    if ";" in raw and "=" in raw.split(";", 1)[0]:
+        mapping = {
+            "host": "host", "server": "host", "data source": "host",
+            "port": "port",
+            "database": "dbname", "dbname": "dbname", "initial catalog": "dbname",
+            "user": "user", "username": "user", "user id": "user", "uid": "user",
+            "password": "password", "pwd": "password",
+            "sslmode": "sslmode",
+            "application_name": "application_name", "application name": "application_name",
+        }
+        out = {}
+        for part in raw.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            key = mapping.get(k.strip().lower())
+            if key and v.strip():
+                out[key] = v.strip()
+        if not out:
+            return raw
+        return " ".join(f"{k}={v}" for k, v in out.items())
+
+    # Already libpq key=value, or unknown — return as-is
+    return raw
+
+
 def _normalize_pg_mem_dsn(dsn: str) -> str:
-    raw = dsn.strip()
+    """Normalize a DSN to the URI form that psycopg2 prefers.
+
+    Used by the Python plugin so users can paste ANY of the three accepted
+    forms and the plugin's psycopg2 driver handles it. The C# binary
+    uses `_dsn_to_libpq` (above) for the opposite direction.
+    """
+    raw = (dsn or "").strip()
+    if not raw:
+        return raw
+    if raw.startswith(("postgresql://", "postgres://")):
+        return raw  # psycopg2 accepts URI form natively
+    # If it's libpq key=value, return as-is — psycopg2 accepts that too.
+    # Only the ADO-style `;` form needs translation; use the same mapping
+    # as before for backwards-compat with the original normalizer.
     if ";" not in raw or "=" not in raw.split(";", 1)[0]:
         return raw
     mapping = {

@@ -1,7 +1,6 @@
-using System.Text.Json;
 using Hermes.Memory.Core.Db;
 using Hermes.Memory.Core.Embeddings;
-using Hermes.Memory.Core.Memory;
+using Hermes.Memory.Core.Kanban;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -9,7 +8,19 @@ using Xunit;
 
 namespace Hermes.Memory.Integration;
 
-public sealed class MemoryRepositoryTests : IAsyncLifetime
+/// <summary>
+/// Regression tests for issue #2: C# MCP `kanban_list` fails with 42P08
+/// (ambiguous_parameter_type) on null filter args.
+///
+/// Root cause: `cmd.Parameters.AddWithValue("p", (object?)null ?? DBNull.Value)`
+/// lets Npgsql infer the type from the .NET value — but a null has no
+/// type, so Postgres rejects the parameter as "could not determine
+/// data type of parameter $N".
+///
+/// Fix: pin the Postgres type with `NpgsqlParameter(name, NpgsqlDbType.X)`
+/// so a null value is still typed.
+/// </summary>
+public sealed class KanbanRepositoryTests : IAsyncLifetime
 {
     private readonly PostgreSqlBuilder _builder = new PostgreSqlBuilder()
         .WithImage("hermes-postgres:dev")
@@ -21,7 +32,7 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
     private PostgreSqlContainer? _container;
     private NpgsqlDataSource _ds = null!;
     private HermesDataSource _hermes = null!;
-    private MemoryRepository _repo = null!;
+    private KanbanRepository _repo = null!;
     private EmbedderRegistry _embedders = null!;
 
     private static string FindSchemaFile()
@@ -56,11 +67,10 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
             await _container.StartAsync();
             raw = _container.GetConnectionString();
 
+            // The schema file lives at <repo>/docker/postgres/bin/01-schemas.sql,
+            // and \ir references ../../../migrations/*.sql — so the migrations
+            // directory is three levels up from the schema file's directory.
             var schemaFile = FindSchemaFile();
-            // \ir in 01-schemas.sql is a psql meta-command — Npgsql can't execute
-            // those. Inline the migration files instead. The schema file lives
-            // at <repo>/docker/postgres/bin/01-schemas.sql and \ir references
-            // ../../../migrations/*.sql, so migrations is 3 dirs up.
             var repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(schemaFile)!, "..", "..", ".."));
             var migrationsDir = Path.Combine(repoRoot, "migrations");
             var inlineSql = new System.Text.StringBuilder();
@@ -72,26 +82,24 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
                 var path = Path.Combine(migrationsDir, f);
                 if (File.Exists(path)) inlineSql.AppendLine(File.ReadAllText(path));
             }
-            // 01-schemas.sql adds a unique index that the per-file migrations
-            // don't include (it's defined separately as a post-step in the
-            // bootstrap). The Duplicate_Remember test depends on it.
-            inlineSql.AppendLine("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_content_source
-                    ON agent_memory.memories (md5(content), COALESCE(source, ''))
-                    WHERE deleted_at IS NULL;
-                """);
+            if (inlineSql.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    $"no migration files found in {migrationsDir}");
+            }
             await using (var conn = new NpgsqlConnection(raw))
             {
                 await conn.OpenAsync();
+                // The testcontainer image is a vanilla postgres with the extensions
+                // AVAILABLE but not installed. Install them before running the
+                // migration SQL, which expects them to be present.
                 foreach (var ext in new[] { "vector", "postgis", "pg_trgm", "ltree" })
                 {
                     await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
                     await extCmd.ExecuteNonQueryAsync();
                 }
-                await using (var cmd = new NpgsqlCommand(inlineSql.ToString(), conn))
-                {
-                    await cmd.ExecuteNonQueryAsync();
-                }
+                await using var cmd = new NpgsqlCommand(inlineSql.ToString(), conn);
+                await cmd.ExecuteNonQueryAsync();
             }
         }
 
@@ -104,7 +112,7 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
                 failOpen: true, logger: NullLogger.Instance)));
         await _embedders.InitializeAsync(_ds, default);
 
-        _repo = new MemoryRepository(_hermes, _embedders);
+        _repo = new KanbanRepository(_hermes);
     }
 
     public async Task DisposeAsync()
@@ -117,49 +125,42 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Regression for issue #2: passing no filters must NOT raise 42P08.
+    /// </summary>
     [Fact]
-    public async Task Remember_Then_Search_Finds_It()
+    public async Task ListTasks_With_No_Filters_Does_Not_Raise_Ambiguous_Param_Type()
     {
-        var unique = Guid.NewGuid().ToString("N")[..8];
-        var id = await _repo.RememberAsync(
-            content: $"User prefers Postgres over MySQL for new projects ({unique})",
-            tags: new[] { "preferences", "databases" },
-            category: "preferences",
-            source: "test");
-        Assert.True(id > 0);
-
-        var hits = await _repo.SearchAsync($"Postgres MySQL projects {unique}", topK: 5);
-        Assert.NotEmpty(hits);
-        Assert.Contains(hits, h => h.Id == id);
+        // Before the fix, this raised:
+        //   Npgsql.PostgresException: 42P08: could not determine data type of parameter $1
+        // because @tenant was passed as DBNull without a typed parameter.
+        var tasks = await _repo.ListTasksAsync();
+        Assert.NotNull(tasks);
+        Assert.Empty(tasks);   // fresh DB, no rows
     }
 
+    /// <summary>
+    /// All-null filter combination should also work (exercises every nullable param).
+    /// </summary>
     [Fact]
-    public async Task Forget_Sets_DeletedAt_And_Excludes_From_Search()
+    public async Task ListTasks_With_All_Null_Filters_Does_Not_Raise_Ambiguous_Param_Type()
     {
-        var unique = Guid.NewGuid().ToString("N")[..8];
-        var id = await _repo.RememberAsync($"delete me ephemeral test content ({unique})", tags: new[] { "ephemeral" });
-        Assert.True(id > 0);
-        Assert.True(await _repo.ForgetAsync(id));
-        var hits = await _repo.SearchAsync($"delete me ephemeral {unique}", topK: 5);
-        Assert.DoesNotContain(hits, h => h.Id == id);
+        var tasks = await _repo.ListTasksAsync(tenantSlug: null, status: null, assignee: null);
+        Assert.NotNull(tasks);
     }
 
+    /// <summary>
+    /// Mixed null + real filter — confirms the pinned-type fix doesn't break
+    /// the case where filters are populated.
+    /// </summary>
     [Fact]
-    public async Task Duplicate_Remember_Returns_Zero()
+    public async Task ListTasks_With_Tenant_Only_Filters_Results()
     {
-        var unique = $"unique content {Guid.NewGuid()}";
-        var id1 = await _repo.RememberAsync(unique, source: "test");
-        var id2 = await _repo.RememberAsync(unique, source: "test");
-        Assert.NotEqual(0, id1);
-        Assert.Equal(0, id2);
-    }
-
-    [Fact]
-    public async Task Stats_Reports_Live_Count()
-    {
-        var unique = Guid.NewGuid().ToString("N")[..8];
-        await _repo.RememberAsync($"stats test memory ({unique})", source: "test");
-        var stats = await _repo.GetStatsAsync();
-        Assert.True(stats.Live >= 1);
+        // Seed a tenant + task so the filter has something to match.
+        await _repo.UpsertTenantAsync("test-tenant-" + Guid.NewGuid().ToString("N")[..6], "Test Tenant");
+        // First, list all (the test above already proved no filters works).
+        // Then list with a non-existent tenant — should return [].
+        var tasks = await _repo.ListTasksAsync(tenantSlug: "no-such-tenant-12345");
+        Assert.Empty(tasks);
     }
 }

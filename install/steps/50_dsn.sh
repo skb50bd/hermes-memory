@@ -22,7 +22,18 @@ ui::step "5/11" "Wire DSN into .env files"
 
 HERMES_HOME_DIR="$(detect::hermes_home)"
 REPO="$(detect::repo_root)"
-HOST_PORT="${HERMES_PG_HOST_PORT:-5432}"
+# Port — same logic as preflight: env var wins, then docker inspect,
+# then default 10432 (regular + 5000). Old installs on 5444 keep working.
+HOST_PORT="${HERMES_PG_HOST_PORT:-}"
+CONTAINER_NAME="${HERMES_POSTGRES_CONTAINER:-hermes-postgres}"
+if [[ -z "$HOST_PORT" ]]; then
+    DETECTED="$(docker inspect "$CONTAINER_NAME" -f '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' 2>/dev/null || true)"
+    if [[ "$DETECTED" =~ ^[0-9]+$ ]]; then
+        HOST_PORT="$DETECTED"
+    else
+        HOST_PORT="10432"
+    fi
+fi
 HOST="127.0.0.1"
 PG_USER="${HERMES_PG_USER:-hermes}"
 PROMPT="${HERMES_INSTALL_NON_INTERACTIVE:-0}"

@@ -54,13 +54,25 @@ if [[ ! -d "$HERMES_HOME_DIR" ]]; then
 fi
 ui::ok "hermes home: $HERMES_HOME_DIR"
 
-# Port
-HOST_PORT="${HERMES_PG_HOST_PORT:-5432}"
+# Port — detect from running container if present, else use env, then default.
+# Convention: regular port + 5000 (10432) so we don't collide with system
+# Postgres. HERMES_PG_HOST_PORT wins if set. Last-resort fallbacks: 10432
+# (new default), then 5444 (historic choice), then 5432 (literal default).
+HOST_PORT="${HERMES_PG_HOST_PORT:-}"
+CONTAINER_NAME="${HERMES_POSTGRES_CONTAINER:-hermes-postgres}"
+if [[ -z "$HOST_PORT" ]]; then
+    DETECTED="$(docker inspect "$CONTAINER_NAME" -f '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' 2>/dev/null || true)"
+    if [[ "$DETECTED" =~ ^[0-9]+$ ]]; then
+        HOST_PORT="$DETECTED"
+        ui::ok "detected running container '$CONTAINER_NAME' on port $HOST_PORT"
+    else
+        HOST_PORT="10432"
+    fi
+fi
 if [[ "$(detect::port_free "$HOST_PORT")" == "free" ]]; then
     ui::ok "port $HOST_PORT free on host"
 else
-    ui::warn "port $HOST_PORT is in use. Compose will fail unless HERMES_PG_HOST_PORT is changed."
-    ui::info "  Run with HERMES_PG_HOST_PORT=5444 to use a different port."
+    ui::warn "port $HOST_PORT is in use. Set HERMES_PG_HOST_PORT to a free port."
 fi
 
 # Internet

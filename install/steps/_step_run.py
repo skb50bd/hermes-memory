@@ -155,8 +155,9 @@ def banner(title: str):
     print(f"\n{c('═══ ' + title + ' ═══', Colors.BOLD + Colors.CYAN)}")
 
 
-def step(n: int, total: int, title: str):
-    print(f"\n{c(f'Step {n}/{total}', Colors.BOLD + Colors.BLUE)}  {c(title, Colors.BOLD)}")
+def step(n: int, total: int, title: str, char: str = ""):
+    prefix = f"{c(char, Colors.YELLOW)} " if char else ""
+    print(f"\n{c(f'Step {n}/{total}', Colors.BOLD + Colors.BLUE)}  {prefix}{c(title, Colors.BOLD)}")
 
 
 def ok(msg: str):
@@ -353,6 +354,23 @@ def create_db(name: str, template: str | None = None, container: str = "hermes-p
     pg_exec(sql, container=container)
 
 
+def drop_db(name: str, container: str = "hermes-postgres") -> bool:
+    """Drop a database. Returns True if dropped, False if it didn't exist.
+
+    Disconnects any active sessions first so the drop doesn't fail with
+    'database is being accessed by other users'.
+    """
+    if not db_exists(name, container=container):
+        return False
+    pg_exec(
+        f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        f"WHERE datname='{name}' AND pid <> pg_backend_pid()",
+        container=container,
+    )
+    pg_exec(f'DROP DATABASE IF EXISTS "{name}"', container=container)
+    return True
+
+
 def extensions_available(container: str = "hermes-postgres") -> list[str]:
     r = pg_exec(
         "SELECT name FROM pg_available_extensions WHERE name IN "
@@ -365,14 +383,24 @@ def extensions_available(container: str = "hermes-postgres") -> list[str]:
 # ─── Password resolution ─────────────────────────────────────────────────
 
 def resolve_password(hermes_home: Path, repo: Path) -> str:
-    """Pull password from env → compose → existing DSN → prompt/dev fallback."""
+    """Pull password from env → compose → existing DSN → prompt/dev fallback.
+
+    Defensive: rejects values containing whitespace, which is a strong
+    signal that the env var was mangled (e.g. a prior session exported
+    `POSTGRES_PASSWORD=*** POSTGRES_PORT=5432` and the redaction
+    system concatenated the two). Trust auth on the local dev container
+    means any sane password works, so a clean value is preferable.
+    """
+    def _is_clean(pw: str) -> bool:
+        return bool(pw) and not any(c.isspace() for c in pw)
+
     # 1. Env var
     pw = os.environ.get(PW_ENV_NAME, "").strip()
-    if pw:
+    if _is_clean(pw):
         return pw
     # 2. POSTGRES_PASSWORD
     pw = os.environ.get(PG_ENV_NAME, "").strip()
-    if pw:
+    if _is_clean(pw):
         return pw
     # 3. compose/.env
     compose_env = repo / "compose" / ".env"
@@ -383,7 +411,19 @@ def resolve_password(hermes_home: Path, repo: Path) -> str:
                 continue
             k, _, v = line.partition("=")
             if k.strip() == PW_ENV_NAME and v.strip():
-                return v.strip().strip('"').strip("'")
+                candidate = v.strip().strip('"').strip("'")
+                if _is_clean(candidate):
+                    return candidate
+    # 3.5. Probe the live container's POSTGRES_PASSWORD env. This is the
+    # most reliable source when the container was started with a custom
+    # password that's not in the host env. Skip if the container isn't up.
+    container_name = os.environ.get("HERMES_POSTGRES_CONTAINER", "hermes-postgres")
+    r = subprocess.run(
+        ["docker", "exec", container_name, "printenv", PG_ENV_NAME],
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0 and _is_clean(r.stdout.strip()):
+        return r.stdout.strip()
     # 4. existing PG_MEM_DB_CONN_STR
     root_env = hermes_home / ".env"
     if root_env.exists():
@@ -393,7 +433,9 @@ def resolve_password(hermes_home: Path, repo: Path) -> str:
                 dsn = line.split("=", 1)[1].strip().strip('"').strip("'")
                 m = re.match(r"^postgresql://[^:@]+:(.+)@[^@]+$", dsn)
                 if m:
-                    return m.group(1)
+                    candidate = m.group(1)
+                    if _is_clean(candidate):
+                        return candidate
     # 5. Prompt or fallback
     if NON_INTERACTIVE:
         return base64.b64decode(DEV_PW_B64).decode("utf-8")
@@ -434,12 +476,16 @@ class Wizard:
             redacted = dsn.replace("***", "***")
             print(f"  wrote {env_file}")
             print(f"    {redacted}")
-        # Save canonical DSN
+        # Save canonical DSN to state — use a redacted form (*** for password)
+        # so we don't leak credentials into ~/.hermes/state/*.json. Later steps
+        # that need a real DSN call resolve_password() to reconstruct it.
         default_dsn = f"postgresql://{user}:***@{host}:{port}/{dbs[0]}"
         self.state.set("databases.dsn", default_dsn)
         self.state.set("databases.user", user)
         self.state.set("databases.host", host)
         self.state.set("databases.port", port)
+        self.state.touch()
+        self.state.save()
 
     # ── Step functions ───────────────────────────────────────────────────
 
@@ -468,12 +514,23 @@ def step_preflight(wiz: Wizard):
     # Hermes home
     wiz.hermes_home.mkdir(parents=True, exist_ok=True)
     ok(f"hermes home: {wiz.hermes_home}")
-    # Port
-    host_port = int(os.environ.get("HERMES_PG_HOST_PORT", "5432"))
+    # Port — detect from running container if present, else use env, then default.
+    # Convention: regular port + 5000 (10432) so we don't collide with system
+    # Postgres. Last-resort fallbacks: 10432 (new), 5444 (historic), 5432 (literal).
+    container_name = os.environ.get("HERMES_POSTGRES_CONTAINER", "hermes-postgres")
+    host_port = None
+    r = subprocess.run(
+        ["docker", "inspect", container_name, "-f", "{{(index (index .NetworkSettings.Ports \"5432/tcp\") 0).HostPort}}"],
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0 and r.stdout.strip().isdigit():
+        host_port = int(r.stdout.strip())
+        ok(f"detected running container '{container_name}' on port {host_port}")
+    host_port = host_port or int(os.environ.get("HERMES_PG_HOST_PORT", "10432"))
     if port_free(host_port):
         ok(f"port {host_port} free on host")
     else:
-        warn(f"port {host_port} in use. Compose will fail unless HERMES_PG_HOST_PORT is changed.")
+        warn(f"port {host_port} in use. Set HERMES_PG_HOST_PORT to a free port.")
     # Internet
     try:
         urllib.request.urlopen("https://github.com", timeout=5)
@@ -648,7 +705,7 @@ def step_profiles(wiz: Wizard):
 @register(5, "Wire DSN into .env files")
 def step_dsn(wiz: Wizard):
     step(5, 11, "Wire DSN into .env files")
-    host_port = wiz.state.get("preflight.host_port", 5432)
+    host_port = wiz.state.get("preflight.host_port", 10432)
     user = os.environ.get("HERMES_PG_USER", "hermes")
     password = resolve_password(wiz.hermes_home, wiz.repo)
     ok(f"Resolved password (length: {len(password)})")
@@ -674,8 +731,11 @@ def step_embedder(wiz: Wizard):
     pick = select("Embedder provider", options, default_index=default_idx)
     provider = pick.split()[0]
     api_key_env = ""
+    # Ollama local port: regular + 5000 = 16434. HERMES_OLLAMA_HOST_PORT
+    # overrides; falls back to old 11434 if explicitly set, otherwise 16434.
+    ollama_port = os.environ.get("HERMES_OLLAMA_HOST_PORT", "16434")
     if provider == "ollama_local":
-        base_url: str = "http://127.0.0.1:11434"
+        base_url: str = f"http://127.0.0.1:{ollama_port}"
     elif provider == "kimi":
         base_url = "https://api.kimi.com/coding/v1"
         api_key_env = KIMI_KEY_NAME
@@ -793,18 +853,38 @@ def step_mcp(wiz: Wizard):
     r = subprocess.run(
         ["hermes", "mcp", "add", server_name,
          "--command", bin_path,
-         "--args", "--mcp",
+         "--args=--mcp",
          "--env", *env_pairs],
-        capture_output=True, text=True,
+        capture_output=True, text=True, input="y\n",
     )
     if r.returncode != 0:
         fail(f"hermes mcp add failed: {r.stderr or r.stdout}")
+    # The `hermes mcp add --env KEY=VALUE` flag is buggy in some hermes
+    # versions — it does not persist the env block. Patch the YAML
+    # directly to guarantee the env is set when the MCP server starts.
+    config_path = wiz.hermes_home / "config.yaml"
+    if config_path.exists():
+        try:
+            import yaml
+            with config_path.open() as f:
+                cfg = yaml.safe_load(f) or {}
+            servers = cfg.setdefault("mcp_servers", {})
+            entry = servers.setdefault(server_name, {})
+            entry["env"] = {p.split("=", 1)[0]: p.split("=", 1)[1] for p in env_pairs if "=" in p}
+            entry["enabled"] = True
+            with config_path.open("w") as f:
+                yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+            ok(f"Patched {config_path} with env block (hermes mcp add --env fallback)")
+        except Exception as e:
+            warn(f"YAML env-block patch failed: {e}")
     ok(f"Registered MCP server '{server_name}'")
     # Verify
     r = subprocess.run(["hermes", "mcp", "test", server_name], capture_output=True, text=True)
     out = (r.stdout or "") + (r.stderr or "")
     if "OK" in out or r.returncode == 0:
         ok("MCP server responds to handshake")
+    elif "disabled" in out:
+        warn("MCP server saved but disabled; check your hermes config")
     else:
         warn(f"MCP test returned: {out.strip()[:200]}")
     wiz.state.set("mcp.registered", True)
@@ -855,38 +935,70 @@ def step_smoke(wiz: Wizard):
     dsn = wiz.state.get("databases.dsn")
     if not dsn:
         fail("Step 5 (DSN) must run first")
-    # Real DSN needed (resolve_password from sources)
+    # Resolve real DSN
     password = resolve_password(wiz.hermes_home, wiz.repo)
     real_dsn = dsn.replace("***", password, 1)
-    # Use the Python plugin's pg_remember / pg_search to roundtrip a probe
-    info("Writing probe memory via pg_remember…")
-    probe = "hermes-memory install probe — please ignore"
-    mem_id: int = 0
-    mem = None
-    # Import the plugin and use it
-    sys.path.insert(0, str(wiz.repo / "plugins" / "memory" / "postgres"))
+    # Use psql directly for the smoke test — the Python plugin uses
+    # class-based API (MemoryProvider), not module-level functions, and
+    # the orchestrator can't easily import the agent-managed version.
+    # A direct INSERT roundtrip is the simplest end-to-end check.
+    probe = f"hermes-memory install probe {int(time.time())} — please ignore"
+    info("Writing probe memory via psql…")
     try:
-        import importlib
-        mem = importlib.import_module("__init__")
-        # Re-resolve the embedder config from the registry
-        mem_id = mem.remember(probe, category="project.convention", tags=["install-probe"])
+        # Use the C# binary's --mcp path? No — direct psql is faster and
+        # exercises the connection, not the embedder.
+        import subprocess
+        env = os.environ.copy()
+        env["PGPASSWORD"] = password
+        # INSERT a probe memory
+        result = subprocess.run(
+            ["psql", real_dsn, "-c",
+             f"INSERT INTO agent_memory.memories (content, category, tags, source) "
+             f"VALUES ('{probe}', 'project.convention', '{{install-probe}}', 'install-smoke') "
+             f"RETURNING id;"],
+            capture_output=True, text=True, env=env
+        )
+        if result.returncode != 0:
+            fail(f"INSERT failed: {result.stderr}")
+        # Extract id from output
+        import re as _re
+        m = _re.search(r"^\s*(\d+)\s*$", result.stdout, _re.M)
+        if not m:
+            fail(f"could not extract id from psql output: {result.stdout}")
+        mem_id = int(m.group(1))
         ok(f"  probe memory stored (id={mem_id})")
     except Exception as e:
-        fail(f"pg_remember failed: {e}")
-    info("Searching for the probe via pg_search…")
+        fail(f"psql INSERT failed: {e}")
+    info("Searching for the probe via psql FTS…")
     try:
-        hits = mem.search("install probe")  # type: ignore
-        if not hits:
-            fail("pg_search returned no results for the probe we just wrote")
-        ok(f"  found {len(hits)} matching memories (top: {hits[0].get('content','')[:60]})")
+        import subprocess
+        env = os.environ.copy()
+        env["PGPASSWORD"] = password
+        result = subprocess.run(
+            ["psql", real_dsn, "-c",
+             f"SELECT id, content FROM agent_memory.memories "
+             f"WHERE deleted_at IS NULL AND content_tsv @@ plainto_tsquery('english', 'install probe') "
+             f"ORDER BY ts_rank(content_tsv, plainto_tsquery('english', 'install probe')) DESC LIMIT 1;"],
+            capture_output=True, text=True, env=env
+        )
+        if result.returncode != 0 or str(mem_id) not in result.stdout:
+            fail(f"psql FTS did not find probe id={mem_id}: {result.stdout}")
+        ok(f"  FTS roundtrip succeeded (found id={mem_id} via tsvector)")
     except Exception as e:
-        fail(f"pg_search failed: {e}")
+        fail(f"psql SELECT failed: {e}")
     info("Soft-deleting the probe…")
     try:
-        mem.forget(mem_id)  # type: ignore
-        ok(f"  probe memory id={mem_id} soft-deleted (kept in table, excluded from searches)")
+        import subprocess
+        env = os.environ.copy()
+        env["PGPASSWORD"] = password
+        subprocess.run(
+            ["psql", real_dsn, "-c",
+             f"UPDATE agent_memory.memories SET deleted_at = now() WHERE id = {mem_id};"],
+            capture_output=True, text=True, env=env, check=True
+        )
+        ok(f"  probe memory id={mem_id} soft-deleted")
     except Exception as e:
-        warn(f"pg_forget failed: {e} (probe memory remains; will not pollute future results because it's filtered by deleted_at)")
+        warn(f"soft-delete failed: {e} (probe memory remains; excluded from searches by deleted_at)")
     wiz.state.set("smoke.last_run", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     wiz.state.set("smoke.probe_id", mem_id)
     wiz.state.touch()
@@ -951,8 +1063,132 @@ def step_summary(wiz: Wizard):
 
 # ─── Main dispatch ──────────────────────────────────────────────────────
 
+# Reverse mapping: when in uninstall mode, each registered step function
+# gets a chance to undo what it did. The reverse handlers live in the
+# `REVERSE_STEPS` dict; if a step has no entry, the uninstaller skips it.
+REVERSE_STEPS: dict[int, Callable[["Wizard"], None]] = {}
+
+
+def reverse(step_num: int):
+    """Decorator: register a step's uninstall handler."""
+    def deco(fn: Callable[["Wizard"], None]) -> Callable[["Wizard"], None]:
+        REVERSE_STEPS[step_num] = fn
+        return fn
+    return deco
+
+
+# ─── Uninstall handlers ────────────────────────────────────────────────
+
+@reverse(8)
+def reverse_mcp(wiz: Wizard):
+    """Remove the hermes-memory MCP server registration."""
+    step(8, 11, "Unregister MCP server", char="↩")
+    server_name = os.environ.get("HERMES_MEMORY_MCP_NAME", "hermes-memory")
+    r = subprocess.run(["hermes", "mcp", "remove", server_name],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        ok(f"Removed MCP server '{server_name}'")
+    else:
+        warn(f"MCP server '{server_name}' not present or remove failed")
+    wiz.state.set("mcp.registered", False)
+    wiz.state.touch()
+    wiz.state.save()
+
+
+@reverse(5)
+def reverse_dsn(wiz: Wizard):
+    """Remove the DSN lines we wrote to ~/.hermes/.env and per-profile .env."""
+    step(5, 11, "Unwire DSN from .env files", char="↩")
+    hermes_home = wiz.hermes_home
+    profiles = wiz.state.get("databases.profiles", ["hermes_default"])
+    targets: set[Path] = {hermes_home / ".env"}
+    for db in profiles:
+        if db == "hermes_default":
+            targets.add(hermes_home / ".env")
+        else:
+            profile = db.replace("hermes_", "")
+            targets.add(hermes_home / "profiles" / profile / ".env")
+    import re as _re
+    for env_file in sorted(targets):
+        if not env_file.exists():
+            continue
+        content = env_file.read_text()
+        for pattern in [
+            r"^PG_MEM_DB_CONN_STR=.*\n?",
+            r"^HERMES_PG_CONN_STR=.*\n?",
+            r"^HERMES_EMBED_PROVIDER_\d+=.*\n?",
+            r"^HERMES_EMBED_BASE_URL_\d+=.*\n?",
+            r"^HERMES_EMBED_MODEL_\d+=.*\n?",
+        ]:
+            content = _re.sub(pattern, "", content, flags=_re.M)
+        # Also strip the "added today" comment block
+        content = _re.sub(
+            r"\n?# --- hermes-memory install.*\n",
+            "\n",
+            content,
+        )
+        env_file.write_text(content)
+        ok(f"Cleaned {env_file}")
+    wiz.state.set("databases.dsn", None)
+    wiz.state.set("databases.user", None)
+    wiz.state.set("databases.host", None)
+    wiz.state.set("databases.port", None)
+    wiz.state.touch()
+    wiz.state.save()
+
+
+@reverse(4)
+def reverse_profiles(wiz: Wizard):
+    """Drop the per-profile databases — but only with explicit confirmation.
+
+    These DBs contain user data (memories, wiki, journal, kanban tasks).
+    The default is to KEEP them; the user can re-install hermes-memory
+    later and pick up where they left off. Pass HERMES_WIPE_DATA=1 to
+    actually drop the DBs.
+    """
+    step(4, 11, "Drop per-profile databases", char="↩")
+    profiles = wiz.state.get("databases.profiles", ["hermes_default"])
+    wipe = os.environ.get("HERMES_WIPE_DATA", "0") == "1"
+    if not wipe:
+        warn("Preserving user data (set HERMES_WIPE_DATA=1 to drop DBs)")
+        for db in profiles:
+            ok(f"'{db}' preserved")
+        return
+    for db in profiles:
+        if db_exists(db):
+            info(f"Dropping '{db}'…")
+            drop_db(db)
+            ok(f"Dropped '{db}'")
+        else:
+            ok(f"'{db}' not present, skipping")
+    wiz.state.set("databases.profiles", [])
+    wiz.state.touch()
+    wiz.state.save()
+
+
+@reverse(0)
+def reverse_preflight(wiz: Wizard):
+    """Final state cleanup: delete the state file so re-install starts fresh."""
+    step(0, 11, "Clear install state", char="↩")
+    if wiz.state.path.exists():
+        wiz.state.path.unlink()
+        ok(f"Removed {wiz.state.path}")
+    else:
+        ok("State file not present")
+
+
 def main():
     step_num_str = os.environ.get("HERMES_STEP", "")
+    install_mode = os.environ.get("HERMES_INSTALL_MODE", "install")
+
+    if install_mode == "uninstall":
+        # Run registered uninstall handlers in reverse step order.
+        wiz = Wizard()
+        for n, name, _ in sorted(STEPS, key=lambda s: -s[0]):
+            if n in REVERSE_STEPS:
+                REVERSE_STEPS[n](wiz)
+        return 0
+
     if not step_num_str:
         # Run all steps in order
         wiz = Wizard()

@@ -25,7 +25,8 @@
 #   HERMES_PG_USER          postgres role (default: hermes)
 #   HERMES_PG_PASSWORD      role password (default: changeme)
 #   HERMES_PG_HOST          host the container's 5432 maps to (default: 127.0.0.1)
-#   HERMES_PG_PORT          host port (default: 5432)
+#   HERMES_PG_PORT          host port (default: 10432, regular + 5000)
+#                           Pass 5444 here for the historic install.
 #   HERMES_MEMORY_REPO      path to hermes-memory repo
 #   HERMES_HOME             path to hermes-agent home
 set -euo pipefail
@@ -36,7 +37,7 @@ PG_CONTAINER="${HERMES_PG_CONTAINER:-hermes-postgres}"
 PG_USER="${HERMES_PG_USER:-hermes}"
 PG_PASSWORD="${HERMES_PG_PASSWORD:-changeme}"
 PG_HOST="${HERMES_PG_HOST:-127.0.0.1}"
-PG_PORT="${HERMES_PG_PORT:-5432}"
+PG_PORT="${HERMES_PG_PORT:-10432}"
 
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" || "${HERMES_DRY_RUN:-0}" == "1" ]]; then

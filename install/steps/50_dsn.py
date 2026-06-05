@@ -30,14 +30,23 @@ PG_ENV_NAME = "POSTGRES_" + "PASSW" + "ORD"    # POSTGRES_PASSWORD
 
 
 def resolve_password() -> str:
-    """Pull password from env, then compose, then existing DSN, then prompt."""
+    """Pull password from env, then compose, then existing DSN, then prompt.
+
+    Rejects values with whitespace — a strong signal that the source was
+    mangled (e.g. `POSTGRES_PASSWORD=*** POSTGRES_PORT=5432` collapsed by
+    a prior redaction system). Trust auth on the dev container means any
+    clean value works, so we skip and fall through.
+    """
+    def _is_clean(pw: str) -> bool:
+        return bool(pw) and not any(c.isspace() for c in pw)
+
     # 1. Explicit env var
     pw = os.environ.get(PW_ENV_NAME, "").strip()
-    if pw:
+    if _is_clean(pw):
         return pw
     # 2. POSTGRES_PASSWORD (upstream convention)
     pw = os.environ.get(PG_ENV_NAME, "").strip()
-    if pw:
+    if _is_clean(pw):
         return pw
     # 3. compose/.env
     repo = os.environ.get("REPO", "")
@@ -49,7 +58,19 @@ def resolve_password() -> str:
                 continue
             k, _, v = line.partition("=")
             if k.strip() == PW_ENV_NAME and v.strip():
-                return v.strip().strip('"').strip("'")
+                candidate = v.strip().strip('"').strip("'")
+                if _is_clean(candidate):
+                    return candidate
+    # 3.5. Probe the live container's POSTGRES_PASSWORD. Most reliable
+    # source when the container was started with a custom password.
+    import subprocess
+    container_name = os.environ.get("HERMES_POSTGRES_CONTAINER", "hermes-postgres")
+    r = subprocess.run(
+        ["docker", "exec", container_name, "printenv", PG_ENV_NAME],
+        capture_output=True, text=True,
+    )
+    if r.returncode == 0 and _is_clean(r.stdout.strip()):
+        return r.stdout.strip()
     # 4. Existing PG_MEM_DB_CONN_STR in ~/.hermes/.env
     hermes_home = os.environ.get("HERMES_HOME_DIR", os.path.expanduser("~/.hermes"))
     root_env = Path(hermes_home) / ".env"
@@ -60,7 +81,9 @@ def resolve_password() -> str:
                 dsn = line.split("=", 1)[1].strip().strip('"').strip("'")
                 m = re.match(r"^postgresql://[^:@]+:(.+)@[^@]+$", dsn)
                 if m:
-                    return m.group(1)
+                    candidate = m.group(1)
+                    if _is_clean(candidate):
+                        return candidate
     # 5. Prompt or fallback
     non_interactive = os.environ.get("NON_INTERACTIVE", "0") == "1"
     if non_interactive:
@@ -126,6 +149,27 @@ def main() -> int:
         write_env(env_file, dsn)
 
     print(f"DB_LIST={','.join(dbs)}")
+
+    # Also write the DSN to the install state file (redacted form).
+    # Step 8 (MCP register) needs this to know it can proceed, and uses
+    # resolve_password() to substitute the real password when registering.
+    # The state file lives at ~/.hermes/state/hermes-memory.json.
+    state_file = Path(hermes_home) / "state" / "hermes-memory.json"
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text())
+        except json.JSONDecodeError:
+            state = {}
+    else:
+        state = {}
+    state.setdefault("databases", {})
+    state["databases"]["dsn"] = f"postgresql://{user}:***@{host}:{port}/{dbs[0]}"
+    state["databases"]["user"] = user
+    state["databases"]["host"] = host
+    state["databases"]["port"] = port
+    state["databases"]["profiles"] = dbs
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state, indent=2) + "\n")
     return 0
 
 

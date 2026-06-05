@@ -83,7 +83,7 @@ if [ $DO_PLUGIN -eq 1 ]; then
     echo
     printf "${BOLD}Removing plugin + skill files${RESET}\n"
     PLUGIN_DST="$HERMES_HOME/plugins/memory/postgres"
-    SKILL_DST="$HERMES_HOME/skills/devops/hermes-postgres-memory"
+    SKILL_DST="$HERMES_HOME/skills/devops/hermes-memory"
     [ -d "$PLUGIN_DST" ] && echo "  $PLUGIN_DST exists" || echo "  $PLUGIN_DST not present"
     [ -d "$SKILL_DST" ] && echo "  $SKILL_DST exists" || echo "  $SKILL_DST not present"
 
