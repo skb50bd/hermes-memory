@@ -42,6 +42,12 @@ env:
   BINARY_IMAGE_NAME: ${{ github.repository }}/hermes-memory
   DOTNET_VERSION: 10.0.x
   PLATFORMS: linux/amd64,linux/arm64
+  # Opt all actions in this workflow into Node.js 24 BEFORE the June 16 2026
+  # cutoff. Without this, GHA emits a deprecation warning on every job that
+  # uses actions/checkout@v4, actions/setup-dotnet@v4, docker/setup-buildx-
+  # action@v3, etc. Setting it once at the workflow level is enough — every
+  # step inherits the env.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # --------------------------------------------------------------------------
