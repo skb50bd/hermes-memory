@@ -491,12 +491,19 @@ def _default_model_config_for_dim(dim: int) -> dict:
             "cache_dir": cache_dir,
         }
     if dim == 1536:
+        # 1536-dim is intentionally not used — no Ollama model produces 1536,
+        # and the previous kimi/minimax defaults are dead (API keys invalid).
+        # We still support the dim in the schema for forward-compat (e.g.
+        # user adds OPENAI_API_KEY and switches to openai/text-embedding-3-small
+        # via the model-set CLI). Default points at openai so the dim is
+        # usable out-of-the-box if a key is set, but the env override is
+        # required to actually use it.
         return {
             "dim": 1536,
-            "provider": os.environ.get("HERMES_EMBED_PROVIDER_1536", "minimax"),
-            "model": os.environ.get("HERMES_EMBED_MODEL_1536", "embo-01"),
-            "api_key": _resolve_api_key(1536, "minimax"),
-            "base_url": os.environ.get("HERMES_EMBED_BASE_URL_1536", ""),
+            "provider": os.environ.get("HERMES_EMBED_PROVIDER_1536", "openai"),
+            "model": os.environ.get("HERMES_EMBED_MODEL_1536", "text-embedding-3-small"),
+            "api_key": _resolve_api_key(1536, "openai"),
+            "base_url": os.environ.get("HERMES_EMBED_BASE_URL_1536", "https://api.openai.com/v1"),
             "cache_dir": cache_dir,
         }
     raise ValueError(dim)
