@@ -78,8 +78,15 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ env.IMAGE_TAG }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # GHA cache is disabled — the GHA build cache backend has been
+          # returning 400 "Our services aren't available right now"
+          # intermittently for several days, which fails the cache-from
+          # import step at #9 and aborts the whole build. Build is fast
+          # enough locally (~3min cold, ~1min warm) that the cache save
+          # is not worth the flakiness. Re-enable when GHA cache is
+          # stable again.
+          cache-from: ""
+          cache-to: ""
 
   smoke-test:
     # Smoke-test on every push, including PRs. We build a single-arch
