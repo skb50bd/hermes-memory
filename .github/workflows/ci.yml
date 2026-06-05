@@ -1,0 +1,488 @@
+# ----------------------------------------------------------------------------
+# Consolidated CI pipeline for hermes-memory.
+#
+# Replaces 4 legacy workflows (test.yml, build-binary.yml, build-docker.yml,
+# docker.yml, release.yml) with a single linear gate chain.
+#
+# IMPORTANT: Do NOT add any job with `runs-on: ubuntu-*-arm64`.
+# GHA's hosted arm64 pool is scarce; jobs that need arm64 host queue for
+# hours (observed 6681s = 111 min, 2578s = 43 min). Buildx handles
+# multi-arch cross-compile on amd64 hosts just fine — see Dockerfile.publish
+# and docker/postgres/Dockerfile. Every job below uses `ubuntu-latest`
+# (amd64) and produces both archs via `platforms: linux/amd64,linux/arm64`
+# in the buildx step. If a future job truly needs a native arm64 host
+# (e.g. perf benchmarks on real arm64 silicon), set `fail-fast: false` +
+# `timeout-minutes: 15` and add it to the matrix — but think hard first.
+# ----------------------------------------------------------------------------
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Skip path filters (run all jobs)'
+        type: boolean
+        default: false
+
+# Cancel superseded PR runs to save minutes. On main + tags we let runs
+# complete (a stuck main run is better visible than silently cancelled).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/hermes-postgres
+  BINARY_IMAGE_NAME: ${{ github.repository }}/hermes-memory
+  DOTNET_VERSION: 10.0.x
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Stage 0: Detect which paths changed → which downstream jobs to run.
+  # Uses dorny/paths-filter so a README change skips Postgres + binary builds.
+  # --------------------------------------------------------------------------
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      lint: ${{ steps.filter.outputs.lint }}
+      tests: ${{ steps.filter.outputs.tests }}
+      integration: ${{ steps.filter.outputs.integration }}
+      binary: ${{ steps.filter.outputs.binary }}
+      postgres: ${{ steps.filter.outputs.postgres }}
+      workflow: ${{ steps.filter.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            lint:
+              - 'src/**'
+              - 'tests/**'
+              - 'plugins/**'
+              - 'scripts/**'
+              - '**/*.py'
+              - '**/*.cs'
+              - '**/*.csproj'
+              - 'Hermes.Memory.sln'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'global.json'
+              - '.github/workflows/**'
+              - 'pyproject.toml'
+            tests:
+              - 'src/**'
+              - 'tests/**'
+              - '**/*.cs'
+              - '**/*.csproj'
+              - 'Hermes.Memory.sln'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - '.github/workflows/**'
+            integration:
+              - 'src/**'
+              - 'tests/**'
+              - 'migrations/**'
+              - 'docker/postgres/**'
+              - 'plugins/**'
+              - '**/*.cs'
+              - '**/*.csproj'
+              - '.github/workflows/**'
+            binary:
+              - 'src/**'
+              - 'tests/**'
+              - 'Dockerfile.publish'
+              - 'Directory.Build.props'
+              - 'Directory.Packages.props'
+              - 'global.json'
+              - 'Hermes.Memory.sln'
+              - '.github/workflows/**'
+            postgres:
+              - 'docker/postgres/**'
+              - 'migrations/**'
+              - 'plugins/**/sql/**'
+              - 'compose/**'
+              - 'scripts/hermes-bootstrap.sh'
+              - 'scripts/pre-commit'
+              - 'Dockerfile.publish'
+              - '.github/workflows/**'
+            workflow:
+              - '.github/workflows/**'
+
+  # --------------------------------------------------------------------------
+  # Stage 1: Lint — fast feedback on formatting + python style.
+  # --------------------------------------------------------------------------
+  lint:
+    name: lint
+    needs: changes
+    if: |
+      needs.changes.outputs.lint == 'true'
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: dotnet format (verify-only, no write)
+        run: |
+          dotnet format Hermes.Memory.sln \
+            --verify-no-changes \
+            --severity info \
+            --verbosity normal
+
+  # --------------------------------------------------------------------------
+  # Stage 2: Unit tests — fast, no external services.
+  # --------------------------------------------------------------------------
+  unit-test:
+    name: unit-test
+    needs: changes
+    if: |
+      needs.changes.outputs.tests == 'true'
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore Hermes.Memory.sln
+
+      - name: Build
+        run: dotnet build Hermes.Memory.sln -c Release --no-restore
+
+      - name: Unit tests
+        run: |
+          dotnet test tests/Hermes.Memory.Tests/Hermes.Memory.Tests.csproj \
+            --no-build -c Release \
+            --logger "trx;LogFileName=unit-results.trx" \
+            --results-directory ./test-results \
+            --collect:"XPlat Code Coverage"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results/
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # Stage 3: Integration tests — Testcontainers spins up ephemeral pgvector.
+  # --------------------------------------------------------------------------
+  integration-test:
+    name: integration-test
+    needs: [changes, unit-test]
+    if: |
+      (needs.changes.outputs.integration == 'true'
+       || github.event_name == 'workflow_dispatch')
+      && needs.unit-test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions.setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore Hermes.Memory.sln
+
+      - name: Build
+        run: dotnet build Hermes.Memory.sln -c Release --no-restore
+
+      - name: Integration tests (Testcontainers)
+        run: |
+          dotnet test tests/Hermes.Memory.Integration/Hermes.Memory.Integration.csproj \
+            --no-build -c Release \
+            --logger "trx;LogFileName=integration-results.trx" \
+            --results-directory ./integration-results
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: integration-results/
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # Stage 4a: Build the C# CLI (AOT, multi-arch via buildx). amd64 host,
+  # no native arm64 job needed — see header.
+  # --------------------------------------------------------------------------
+  build-binary:
+    name: build-binary
+    needs: [changes, integration-test]
+    if: |
+      (needs.changes.outputs.binary == 'true'
+       || github.event_name == 'workflow_dispatch')
+      && needs.integration-test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "tag=main-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Single amd64 host. buildx pulls moby/buildkit:v0.18.0 (per-arch
+      # native binary) and runs both archs in parallel via the
+      # docker-container driver. No QEMU, no binfmt, no arm64 host queue.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:v0.18.0
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.publish
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.BINARY_IMAGE_NAME }}:${{ steps.refs.outputs.tag }}
+            ${{ steps.refs.outputs.is_release == 'true' && format('{0}/{1}:latest', env.REGISTRY, env.BINARY_IMAGE_NAME) || '' }}
+          labels: |
+            org.opencontainers.image.title=hermes-memory
+            org.opencontainers.image.description=Hermes Agent memory + kanban + journal + wiki + skills MCP server (C# .NET 10, self-contained)
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.refs.outputs.tag }}
+          # GHA build cache is disabled per commit 39b9ab2 — the cache
+          # backend returns 400 "Our services aren't available right now"
+          # intermittently. Re-enable when stable.
+          cache-from: ""
+          cache-to: ""
+
+  # --------------------------------------------------------------------------
+  # Stage 4b: Build the Postgres image (multi-arch via buildx).
+  # --------------------------------------------------------------------------
+  build-postgres:
+    name: build-postgres
+    needs: [changes, integration-test]
+    if: |
+      (needs.changes.outputs.postgres == 'true'
+       || github.event_name == 'workflow_dispatch')
+      && needs.integration-test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image refs
+        id: refs
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "tag=main-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+            echo "is_main=true" >> $GITHUB_OUTPUT
+          else
+            echo "tag=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "is_release=false" >> $GITHUB_OUTPUT
+            echo "is_main=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:v0.18.0
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/postgres/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.refs.outputs.tag }}
+            ${{ steps.refs.outputs.is_release == 'true' && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
+            ${{ steps.refs.outputs.is_main == 'true' && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          labels: |
+            org.opencontainers.image.title=hermes-postgres
+            org.opencontainers.image.description=Postgres 18 + pgvector + pg_trgm + ltree + timescaledb + pg_cron + apache-age for the Hermes Agent platform
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.refs.outputs.tag }}
+          cache-from: ""
+          cache-to: ""
+
+  # --------------------------------------------------------------------------
+  # Stage 5a: Smoke-test the binary (extract from multi-arch image, amd64 only).
+  # --------------------------------------------------------------------------
+  smoke-binary:
+    name: smoke-binary
+    needs: [changes, build-binary]
+    if: |
+      (needs.changes.outputs.binary == 'true'
+       || github.event_name == 'workflow_dispatch')
+      && needs.build-binary.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ephemeral test image (amd64)
+        run: |
+          docker buildx build --load \
+            --platform linux/amd64 \
+            -t hermes-memory:smoke \
+            -f Dockerfile.publish .
+
+      - name: Extract binary
+        run: |
+          docker create --name mem-smoke hermes-memory:smoke
+          docker cp mem-smoke:/hermes-memory /tmp/hermes-memory
+          chmod +x /tmp/hermes-memory
+
+      - name: Run --version
+        run: /tmp/hermes-memory --version
+
+      - name: Run --help (first 20 lines)
+        run: /tmp/hermes-memory --help | head -20
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f mem-smoke 2>/dev/null || true
+
+  # --------------------------------------------------------------------------
+  # Stage 5b: Smoke-test the Postgres image (amd64 ephemeral container).
+  # Catches: init.d race, missing extensions, broken migrations.
+  # --------------------------------------------------------------------------
+  smoke-postgres:
+    name: smoke-postgres
+    needs: [changes, build-postgres]
+    if: |
+      (needs.changes.outputs.postgres == 'true'
+       || github.event_name == 'workflow_dispatch')
+      && needs.build-postgres.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ephemeral test image (amd64)
+        run: |
+          docker buildx build --load \
+            --platform linux/amd64 \
+            -t hermes-postgres:smoke \
+            -f docker/postgres/Dockerfile .
+
+      - name: Start container
+        run: |
+          docker run -d --name pg-smoke \
+            -e POSTGRES_PASSWORD=*** \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_DB=postgres \
+            hermes-postgres:smoke
+
+      - name: Wait for init.d to complete
+        # pg_isready returns BEFORE docker_temp_server_stop. Poll for
+        # the sentinel DB (hermes_template) to exist before verifying.
+        run: |
+          for i in {1..60}; do
+            if docker exec pg-smoke pg_isready -U postgres >/dev/null 2>&1; then
+              if docker exec pg-smoke psql -U postgres -d postgres -tAc \
+                  "SELECT 1 FROM pg_database WHERE datname='hermes_template'" \
+                  2>/dev/null | grep -q 1; then
+                echo "init.d complete after ${i}s (hermes_template exists)"
+                break
+              fi
+            fi
+            sleep 1
+          done
+
+      - name: Verify extensions
+        run: |
+          docker exec pg-smoke psql -U postgres -d hermes_template -tAc \
+            "SELECT extname FROM pg_extension \
+             WHERE extname IN ('vector','pg_trgm','ltree','timescaledb','age') \
+             ORDER BY 1" | tee /tmp/exts.txt
+          test "$(wc -l < /tmp/exts.txt)" -eq 5 \
+            || (echo "expected 5 extensions, got:"; cat /tmp/exts.txt; exit 1)
+
+      - name: Verify schemas
+        run: |
+          docker exec pg-smoke psql -U postgres -d hermes_template -tAc \
+            "SELECT schema_name FROM information_schema.schemata \
+             WHERE schema_name IN ('agent_memory','hermes_wiki','hermes_journal','hermes_skills','hermes_metrics') \
+             ORDER BY 1" | tee /tmp/schemas.txt
+          test "$(wc -l < /tmp/schemas.txt)" -ge 5 \
+            || (echo "expected 5 schemas, got:"; cat /tmp/schemas.txt; exit 1)
+
+      - name: Verify profile clone + pg_cron
+        run: |
+          docker exec pg-smoke psql -U postgres -d postgres -c \
+            "CREATE DATABASE hermes_test_clone TEMPLATE hermes_template CONNECTION LIMIT 5"
+          docker exec pg-smoke psql -U postgres -d hermes_test_clone -tAc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema='agent_memory'"
+          docker exec pg-smoke psql -U postgres -d hermes_cron -tAc \
+            "SELECT extname FROM pg_extension WHERE extname='pg_cron'"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f pg-smoke 2>/dev/null || true
