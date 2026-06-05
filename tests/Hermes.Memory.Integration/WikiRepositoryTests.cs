@@ -35,8 +35,12 @@ public sealed class WikiRepositoryTests : IAsyncLifetime
 
     private static string FindSchemaFile()
     {
+        // In the test output (set up by Hermes.Memory.Integration.csproj
+        // <None Include ... CopyToOutputDirectory="PreserveNewest"/>):
+        var output = AppContext.BaseDirectory;
         var paths = new[]
         {
+            Path.Combine(output, "schema", "01-schemas.sql"),
             "../../../../docker/postgres/bin/01-schemas.sql",
             "../../../docker/postgres/bin/01-schemas.sql",
             "../../docker/postgres/bin/01-schemas.sql",
@@ -64,9 +68,13 @@ public sealed class WikiRepositoryTests : IAsyncLifetime
             _container = _builder.Build();
             await _container.StartAsync();
             raw = _container.GetConnectionString();
+
+            // The schema file and migrations are both copied to the test
+            // output by Hermes.Memory.Integration.csproj (CopyToOutputDirectory).
+            // schema/01-schemas.sql sits next to migrations/*.sql in
+            // AppContext.BaseDirectory.
             var schemaFile = FindSchemaFile();
-            var repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(schemaFile)!, "..", "..", ".."));
-            var migrationsDir = Path.Combine(repoRoot, "migrations");
+            var migrationsDir = Path.Combine(AppContext.BaseDirectory, "migrations");
             var inlineSql = new System.Text.StringBuilder();
             foreach (var f in new[] {
                 "0001_agent_memory.sql", "0002_wiki.sql", "0003_journal.sql",

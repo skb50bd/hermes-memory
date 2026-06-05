@@ -26,8 +26,12 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
 
     private static string FindSchemaFile()
     {
+        // In the test output (set up by Hermes.Memory.Integration.csproj
+        // <None Include ... CopyToOutputDirectory="PreserveNewest"/>):
+        var output = AppContext.BaseDirectory;
         var paths = new[]
         {
+            Path.Combine(output, "schema", "01-schemas.sql"),
             "../../../../docker/postgres/bin/01-schemas.sql",
             "../../../docker/postgres/bin/01-schemas.sql",
             "../../docker/postgres/bin/01-schemas.sql",
@@ -56,13 +60,13 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
             await _container.StartAsync();
             raw = _container.GetConnectionString();
 
-            var schemaFile = FindSchemaFile();
             // \ir in 01-schemas.sql is a psql meta-command — Npgsql can't execute
-            // those. Inline the migration files instead. The schema file lives
-            // at <repo>/docker/postgres/bin/01-schemas.sql and \ir references
-            // ../../../migrations/*.sql, so migrations is 3 dirs up.
-            var repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(schemaFile)!, "..", "..", ".."));
-            var migrationsDir = Path.Combine(repoRoot, "migrations");
+            // those. Inline the migration files instead. The schema file and
+            // migrations are both copied to the test output by
+            // Hermes.Memory.Integration.csproj (CopyToOutputDirectory), so
+            // they're siblings under AppContext.BaseDirectory.
+            var schemaFile = FindSchemaFile();
+            var migrationsDir = Path.Combine(AppContext.BaseDirectory, "migrations");
             var inlineSql = new System.Text.StringBuilder();
             foreach (var f in new[] {
                 "0001_agent_memory.sql", "0002_wiki.sql", "0003_journal.sql",
