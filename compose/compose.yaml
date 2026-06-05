@@ -25,14 +25,17 @@ services:
     cpus: "2.00"
     restart: unless-stopped
     environment:
-      PGDATA: /var/lib/postgresql/data
+      # PGDATA is the major-version-specific path used by Postgres 18+
+      # in the official docker image. Mount the volume at the parent
+      # /var/lib/postgresql so the image can manage PGDATA inside.
+      PGDATA: /var/lib/postgresql/18/docker
       POSTGRES_DB: ${HERMES_TEMPLATE_DB:-hermes_template}
       POSTGRES_USER: ${HERMES_PG_USER:-hermes}
       POSTGRES_PASSWORD: ${HERMES_PG_PASSWORD:-changeme}
     ports:
       - "${HERMES_PG_HOST_PORT:-10432}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test:
         - CMD-SHELL

@@ -189,6 +189,17 @@ if [[ "${exists}" != "1" ]]; then
     pg_exec -d postgres -c "CREATE DATABASE ${TEMPLATE_DB}" >/dev/null
 fi
 
+# Enable the 6 extensions that don't require server-level config first.
+# pg_cron is intentionally skipped here — it requires `cron.database_name`
+# in postgresql.conf and is added to a dedicated `hermes_cron` DB by
+# migration 0009_observability.sql (which knows how to wire it up).
+log "enabling required extensions in ${TEMPLATE_DB}"
+for ext in vector postgis timescaledb age pg_trgm ltree; do
+    pg_exec -d "${TEMPLATE_DB}" -c "CREATE EXTENSION IF NOT EXISTS ${ext}" >/dev/null \
+        || die "failed to enable extension ${ext}"
+done
+log "  enabled: vector, postgis, timescaledb, age, pg_trgm, ltree"
+
 log "applying schema to ${TEMPLATE_DB} (using migrations bundled in image at /usr/local/share/hermes/01-schemas.sql)"
 if [[ "${DRY_RUN}" == "1" ]]; then
     echo "  [dry-run] docker exec -i ${PG_CONTAINER} psql -U ${PG_USER} -d ${TEMPLATE_DB} -v ON_ERROR_STOP=1 -f /usr/local/share/hermes/01-schemas.sql"
@@ -198,6 +209,20 @@ else
         -f /usr/local/share/hermes/01-schemas.sql \
         || die "schema apply failed — see output above"
 fi
+
+# Apply the 3 incremental migrations (0007-0009) that aren't bundled in
+# 01-schemas.sql because they're newer than the image was built.
+for m in 0007_wiki_chunks 0008_sessions 0009_observability; do
+    log "applying migration ${m}.sql"
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        echo "  [dry-run] docker exec -i ${PG_CONTAINER} psql -U ${PG_USER} -d ${TEMPLATE_DB} -v ON_ERROR_STOP=1 -f /usr/migrations/${m}.sql"
+    else
+        docker exec -i "${PG_CONTAINER}" \
+            psql -U "${PG_USER}" -d "${TEMPLATE_DB}" -v ON_ERROR_STOP=1 \
+            -f "/usr/migrations/${m}.sql" \
+            || die "migration ${m} failed — see output above"
+    fi
+done
 
 # ── 4. Per-profile role + DB + .env writer ────────────────────────────
 create_profile_role_and_db() {
