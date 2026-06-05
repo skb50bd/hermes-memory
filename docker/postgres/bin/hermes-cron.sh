@@ -19,11 +19,13 @@ until pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
 done
 
-# Create the cron DB if it doesn't exist (TOCTOU-safe via \gexec)
+# Create the cron DB (advisory-lock + TOCTOU-safe via \gexec)
 psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+SELECT pg_advisory_lock(hashtext('hermes_cron_init')::int);
 SELECT 'CREATE DATABASE $CRON_DB'
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname='$CRON_DB')
 \gexec
+SELECT pg_advisory_unlock(hashtext('hermes_cron_init')::int);
 SQL
 
 # Install pg_cron and schedule the jobs

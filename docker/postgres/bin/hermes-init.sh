@@ -8,6 +8,14 @@
 #
 # Or set HERMES_AUTO_INIT=1 in the container env to run automatically
 # on first start (after initdb completes).
+#
+# Concurrency: this script can be invoked from two places on a fresh
+# container — the /docker-entrypoint-initdb.d/ symlink (runs in
+# docker_temp_server during first boot) AND an explicit `docker exec`
+# call (e.g. from CI smoke tests). These race on the same DBs. We
+# serialize via a session-level advisory lock that is held for the
+# entire duration of this script's work, and use \gexec to avoid the
+# check-then-create TOCTOU window inside a single session.
 
 set -e
 
@@ -21,16 +29,16 @@ until pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
 done
 
-# Create the template DB if it doesn't exist. We use psql's \gexec to
-# execute the CREATE inside the same session as the existence check,
-# avoiding a TOCTOU race. When the init.d symlink (99-hermes-init.sh)
-# and an explicit manual call race on a fresh container, a
-# check-then-create pattern produces a "duplicate key" error if the
-# init.d script creates the DB between the check and the create.
+# Acquire advisory lock + create the template DB + release the lock,
+# all in one psql session. The lock prevents a concurrent invocation
+# of this script (e.g. the init.d symlink) from racing with us.
+#   lockid = hashtext('hermes_init') & 0x7FFFFFFF
 psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+SELECT pg_advisory_lock(hashtext('hermes_init')::int);
 SELECT 'CREATE DATABASE $DB'
  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname='$DB')
 \gexec
+SELECT pg_advisory_unlock(hashtext('hermes_init')::int);
 SQL
 
 # Install the 5 extensions (minus pg_cron — it lives in hermes_cron)

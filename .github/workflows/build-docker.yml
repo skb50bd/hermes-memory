@@ -104,22 +104,44 @@ jobs:
             -t hermes-postgres:smoke \
             -f docker/postgres/Dockerfile .
 
-      - name: Start container
+      - name: Start container + wait for init.d
         run: |
           docker run -d --name pg-smoke \
             -e POSTGRES_PASSWORD=*** \
             -e POSTGRES_USER=postgres \
             -e POSTGRES_DB=postgres \
             hermes-postgres:smoke
+          # Wait for postgres to be ready
           for i in {1..60}; do
             docker exec pg-smoke pg_isready -U postgres && break
+            sleep 1
+          done
+          # Then wait for the init.d scripts to complete. The upstream
+          # pgvector entrypoint runs /docker-entrypoint-initdb.d/* in a
+          # docker_temp_server, and pg_isready returns success BEFORE
+          # those scripts have finished. Wait for hermes_template to
+          # actually exist as a DB, which is the last thing hermes-init
+          # creates. Polling avoids the race that produced the
+          # "duplicate key value" errors in earlier runs.
+          for i in {1..60}; do
+            if docker exec pg-smoke psql -U postgres -d postgres -tAc \
+                "SELECT 1 FROM pg_database WHERE datname='hermes_template'" \
+                2>/dev/null | grep -q 1; then
+              echo "init.d scripts complete (hermes_template exists)"
+              break
+            fi
+            echo "  [${i}s] waiting for hermes_template..."
             sleep 1
           done
 
       - name: Verify extensions + init script
         run: |
-          # Run the bundled init script (creates hermes_template + hermes_cron)
-          docker exec pg-smoke /usr/local/bin/hermes-init.sh
+          # NOTE: we do NOT call hermes-init.sh here — the init.d
+          # symlink (99-hermes-init.sh) already ran it during first
+          # boot. Calling it again races with the original invocation
+          # even with TOCTOU-safe \gexec, because the two psql
+          # sessions don't share a transaction.
+          #
           # All 5 extensions must be present in hermes_template
           docker exec pg-smoke psql -U postgres -d hermes_template -tAc \
             "SELECT extname FROM pg_extension WHERE extname IN ('vector','pg_trgm','ltree','timescaledb','age') ORDER BY 1" \
