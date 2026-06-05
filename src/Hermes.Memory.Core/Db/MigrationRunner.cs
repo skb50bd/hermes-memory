@@ -20,18 +20,11 @@ namespace Hermes.Memory.Core.Db;
 ///   3. Apply schema changes that aren't safe to bake into the template
 ///      (e.g. column drops, data backfills).
 /// </summary>
-public sealed class MigrationRunner
+public sealed class MigrationRunner(HermesDataSource dataSource, ILogger<MigrationRunner> logger)
 {
-    private readonly HermesDataSource _dataSource;
-    private readonly ILogger<MigrationRunner> _logger;
-    private readonly IReadOnlyList<Migration> _migrations;
-
-    public MigrationRunner(HermesDataSource dataSource, ILogger<MigrationRunner> logger)
-    {
-        _dataSource = dataSource;
-        _logger = logger;
-        _migrations = LoadMigrations();
-    }
+    private readonly HermesDataSource _dataSource = dataSource;
+    private readonly ILogger<MigrationRunner> _logger = logger;
+    private readonly IReadOnlyList<Migration> _migrations = LoadMigrations();
 
     public IReadOnlyList<Migration> All => _migrations;
 

@@ -10,10 +10,9 @@ namespace Hermes.Memory.Core.Skills;
 /// file lives in the repo (skills-as-code) — this table is just the
 /// searchable index (skills-as-data).
 /// </summary>
-public sealed class SkillsRepository
+public sealed class SkillsRepository(HermesDataSource ds)
 {
-    private readonly HermesDataSource _ds;
-    public SkillsRepository(HermesDataSource ds) => _ds = ds;
+    private readonly HermesDataSource _ds = ds;
 
     /// <summary>
     /// Register or update a skill's catalog entry. Idempotent on
@@ -40,7 +39,7 @@ public sealed class SkillsRepository
         cmd.Parameters.AddWithValue("o", (object?)owner ?? DBNull.Value);
         cmd.Parameters.AddWithValue("d", (object?)description ?? DBNull.Value);
         cmd.Parameters.Add(new NpgsqlParameter("t", NpgsqlDbType.Array | NpgsqlDbType.Text)
-            { Value = (object?)tags ?? Array.Empty<string>() });
+        { Value = (object?)tags ?? Array.Empty<string>() });
         return (long)(await cmd.ExecuteScalarAsync(ct))!;
     }
 
@@ -87,7 +86,7 @@ public sealed class SkillsRepository
                 Version: reader.GetString(1),
                 Owner: reader.IsDBNull(2) ? null : reader.GetString(2),
                 Description: reader.IsDBNull(3) ? null : reader.GetString(3),
-                Tags: reader.IsDBNull(4) ? Array.Empty<string>() : reader.GetFieldValue<string[]>(4),
+                Tags: reader.IsDBNull(4) ? [] : reader.GetFieldValue<string[]>(4),
                 Rank: reader.IsDBNull(5) ? 0 : reader.GetDouble(5)));
         }
         return results;

@@ -13,15 +13,10 @@ namespace Hermes.Memory.Core.Mcp;
 /// name from the method name.
 /// </summary>
 [McpServerToolType]
-public sealed class MemoryTools
+public sealed class MemoryTools(MemoryRepository repo, EmbedderRegistry embedders)
 {
-    private readonly MemoryRepository _repo;
-    private readonly EmbedderRegistry _embedders;
-    public MemoryTools(MemoryRepository repo, EmbedderRegistry embedders)
-    {
-        _repo = repo;
-        _embedders = embedders;
-    }
+    private readonly MemoryRepository _repo = repo;
+    private readonly EmbedderRegistry _embedders = embedders;
 
     [McpServerTool(Name = "memory_remember"), Description("Store a memory. Idempotent on (content, source). Returns the memory id (0 = duplicate).")]
     public async Task<string> Remember(

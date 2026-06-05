@@ -14,18 +14,12 @@ namespace Hermes.Memory.Core.Embeddings;
 /// model/provider strings come from the SQL registry (not from a
 /// hardcoded switch).
 /// </summary>
-public sealed class EmbedderRegistry
+public sealed class EmbedderRegistry(ILogger logger, Func<int, string, string, string?, string?, Task<HermesEmbedder>> factory)
 {
     private readonly ConcurrentDictionary<int, HermesEmbedder> _byDim = new();
-    private readonly Func<int, string, string, string?, string?, Task<HermesEmbedder>> _factory;
-    private readonly ILogger _logger;
+    private readonly Func<int, string, string, string?, string?, Task<HermesEmbedder>> _factory = factory;
+    private readonly ILogger _logger = logger;
     private int _defaultDim;
-
-    public EmbedderRegistry(ILogger logger, Func<int, string, string, string?, string?, Task<HermesEmbedder>> factory)
-    {
-        _logger = logger;
-        _factory = factory;
-    }
 
     public int DefaultDim => _defaultDim;
 
@@ -42,12 +36,12 @@ public sealed class EmbedderRegistry
         while (await reader.ReadAsync(ct))
         {
             _defaultDim = reader.GetInt32(0);
-            var dim      = reader.GetInt32(1);
+            var dim = reader.GetInt32(1);
             var provider = reader.GetString(2);
-            var model    = reader.GetString(3);
-            var baseUrl  = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var model = reader.GetString(3);
+            var baseUrl = reader.IsDBNull(4) ? null : reader.GetString(4);
             var apiKeyEnv = reader.IsDBNull(5) ? null : reader.GetString(5);
-            var apiKey   = apiKeyEnv is null ? null : Environment.GetEnvironmentVariable(apiKeyEnv);
+            var apiKey = apiKeyEnv is null ? null : Environment.GetEnvironmentVariable(apiKeyEnv);
             if (apiKey is null && provider != "noop" && provider != "ollama_local")
             {
                 _logger.LogWarning("No API key in env var {Env} for embedder {Provider}/{Model} (dim={Dim}); embeddings will fail-open to zero",

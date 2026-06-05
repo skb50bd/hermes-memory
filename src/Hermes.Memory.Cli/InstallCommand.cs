@@ -21,14 +21,15 @@ public static class InstallCommand
 {
     public static Command Build()
     {
-        var cmd = new Command("install", "Interactive install/update/uninstall wizard (delegates to ./install.sh)");
-
-        cmd.Add(new Option<bool>("--check"));
-        cmd.Add(new Option<bool>("--update"));
-        cmd.Add(new Option<bool>("--uninstall"));
-        cmd.Add(new Option<int?>("--from"));
-        cmd.Add(new Option<int?>("--step"));
-        cmd.Add(new Option<bool>("--yes"));
+        var cmd = new Command("install", "Interactive install/update/uninstall wizard (delegates to ./install.sh)")
+        {
+            new Option<bool>("--check"),
+            new Option<bool>("--update"),
+            new Option<bool>("--uninstall"),
+            new Option<int?>("--from"),
+            new Option<int?>("--step"),
+            new Option<bool>("--yes")
+        };
 
         // Match the existing handler style: CommandHandler.Create<...>(async (args) => ...)
         cmd.Handler = CommandHandler.Create<bool, bool, bool, int?, int?, bool>(Run);
@@ -60,7 +61,7 @@ public static class InstallCommand
         psi.ArgumentList.Add("bash");
         psi.ArgumentList.Add(installSh);
 
-        if (uninstall)            psi.ArgumentList.Add("--uninstall");
+        if (uninstall) psi.ArgumentList.Add("--uninstall");
         else if (check || update) psi.ArgumentList.Add("--check");
         if (from.HasValue) { psi.ArgumentList.Add("--from"); psi.ArgumentList.Add(from.Value.ToString()); }
         if (step.HasValue) { psi.ArgumentList.Add("--step"); psi.ArgumentList.Add(step.Value.ToString()); }

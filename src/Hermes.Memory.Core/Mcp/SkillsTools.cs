@@ -6,10 +6,9 @@ using ModelContextProtocol.Server;
 namespace Hermes.Memory.Core.Mcp;
 
 [McpServerToolType]
-public sealed class SkillsTools
+public sealed class SkillsTools(SkillsRepository repo)
 {
-    private readonly SkillsRepository _repo;
-    public SkillsTools(SkillsRepository repo) => _repo = repo;
+    private readonly SkillsRepository _repo = repo;
 
     [McpServerTool(Name = "skill_index_search"), Description("Search the installed-skills index. Returns matching skill names + descriptions.")]
     public async Task<string> IndexSearch(

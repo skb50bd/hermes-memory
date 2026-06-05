@@ -11,16 +11,10 @@ namespace Hermes.Memory.Core.Memory;
 /// the per-dim vector column matching the embedder's dim. Soft-delete
 /// via deleted_at. Tags and category (ltree) for faceting.
 /// </summary>
-public sealed class MemoryRepository
+public sealed class MemoryRepository(HermesDataSource ds, EmbedderRegistry embedders)
 {
-    private readonly HermesDataSource _ds;
-    private readonly EmbedderRegistry _embedders;
-
-    public MemoryRepository(HermesDataSource ds, EmbedderRegistry embedders)
-    {
-        _ds = ds;
-        _embedders = embedders;
-    }
+    private readonly HermesDataSource _ds = ds;
+    private readonly EmbedderRegistry _embedders = embedders;
 
     /// <summary>
     /// Store one memory. Embeds the content via the default-dim embedder
@@ -50,14 +44,14 @@ public sealed class MemoryRepository
             RETURNING id
             """, conn);
         cmd.Parameters.AddWithValue("content", content);
-        cmd.Parameters.AddWithValue("v768",   (object?)(dim == 768  ? vec : null) ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("v1024",  (object?)(dim == 1024 ? vec : null) ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("v1536",  (object?)(dim == 1536 ? vec : null) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("v768", (object?)(dim == 768 ? vec : null) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("v1024", (object?)(dim == 1024 ? vec : null) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("v1536", (object?)(dim == 1536 ? vec : null) ?? DBNull.Value);
         cmd.Parameters.Add(new NpgsqlParameter("tags", NpgsqlDbType.Array | NpgsqlDbType.Text)
-            { Value = (object?)tags ?? Array.Empty<string>() });
+        { Value = (object?)tags ?? Array.Empty<string>() });
         cmd.Parameters.Add(new NpgsqlParameter("category", NpgsqlDbType.Unknown)
-            { Value = (object?)category ?? DBNull.Value });
-        cmd.Parameters.AddWithValue("source",   (object?)source   ?? DBNull.Value);
+        { Value = (object?)category ?? DBNull.Value });
+        cmd.Parameters.AddWithValue("source", (object?)source ?? DBNull.Value);
         cmd.Parameters.AddWithValue("metadata", metadata?.GetRawText() ?? "{}");
         var result = await cmd.ExecuteScalarAsync(ct);
         return result is long id ? id : 0L;   // 0 = duplicate, ON CONFLICT fired
@@ -86,7 +80,7 @@ public sealed class MemoryRepository
         // their source row.
         var dimColumn = dim switch
         {
-            768  => "vector_768",
+            768 => "vector_768",
             1024 => "vector_1024",
             1536 => "vector_1536",
             _ => throw new NotSupportedException($"Dim {dim} not supported")
@@ -128,7 +122,7 @@ public sealed class MemoryRepository
             results.Add(new MemoryHit(
                 Id: reader.GetInt64(0),
                 Content: reader.GetString(1),
-                Tags: reader.IsDBNull(2) ? Array.Empty<string>() : reader.GetFieldValue<string[]>(2),
+                Tags: reader.IsDBNull(2) ? [] : reader.GetFieldValue<string[]>(2),
                 Category: reader.IsDBNull(3) ? null : reader.GetString(3),
                 CreatedAt: reader.GetFieldValue<DateTime>(4),
                 Source: reader.IsDBNull(5) ? null : reader.GetString(5),

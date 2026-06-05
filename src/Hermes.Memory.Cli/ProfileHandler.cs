@@ -4,7 +4,7 @@ using Npgsql;
 
 namespace Hermes.Memory.Cli;
 
-public static class ProfileHandler
+public static partial class ProfileHandler
 {
     private static NpgsqlConnection OpenSuperuserConn(string? conn)
     {
@@ -20,7 +20,7 @@ public static class ProfileHandler
         {
             await using var c = OpenSuperuserConn(conn);
             // Sanity: name must match hermes_<x>; reject obvious mistakes.
-            if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z][a-z0-9_]{0,30}$"))
+            if (!MyRegex().IsMatch(name))
             {
                 Console.Error.WriteLine($"Invalid profile name '{name}'. Use lowercase, digits, underscores; max 31 chars.");
                 return 1;
@@ -85,4 +85,6 @@ public static class ProfileHandler
                 return 1;
             }
         });
+    [System.Text.RegularExpressions.GeneratedRegex("^[a-z][a-z0-9_]{0,30}$")]
+    private static partial System.Text.RegularExpressions.Regex MyRegex();
 }

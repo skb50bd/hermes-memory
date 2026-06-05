@@ -13,10 +13,9 @@ namespace Hermes.Memory.Core.Metrics;
 /// rates, MCP tool call counts. Not for conversation logs (those go
 /// in hermes_journal, regular table, different access pattern).
 /// </summary>
-public sealed class MetricsRepository
+public sealed class MetricsRepository(HermesDataSource ds)
 {
-    private readonly HermesDataSource _ds;
-    public MetricsRepository(HermesDataSource ds) => _ds = ds;
+    private readonly HermesDataSource _ds = ds;
 
     public async Task RecordAsync(string profile, string metricName, double value, string? tagsJson = null, CancellationToken ct = default)
     {

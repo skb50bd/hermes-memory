@@ -143,11 +143,16 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: dotnet format (verify-only, no write)
+      - name: dotnet format whitespace (verify-only, no write)
         run: |
-          dotnet format Hermes.Memory.sln \
+          dotnet format whitespace Hermes.Memory.sln \
             --verify-no-changes \
-            --severity info \
+            --verbosity normal
+
+      - name: dotnet format style (verify-only, no write)
+        run: |
+          dotnet format style Hermes.Memory.sln \
+            --verify-no-changes \
             --verbosity normal
 
   # --------------------------------------------------------------------------

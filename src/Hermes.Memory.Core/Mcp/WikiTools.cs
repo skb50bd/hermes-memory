@@ -6,10 +6,9 @@ using ModelContextProtocol.Server;
 namespace Hermes.Memory.Core.Mcp;
 
 [McpServerToolType]
-public sealed class WikiTools
+public sealed class WikiTools(WikiRepository repo)
 {
-    private readonly WikiRepository _repo;
-    public WikiTools(WikiRepository repo) => _repo = repo;
+    private readonly WikiRepository _repo = repo;
 
     [McpServerTool(Name = "wiki_create"), Description("Create or update a wiki document by slug. Idempotent on slug.")]
     public async Task<string> Create(

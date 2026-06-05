@@ -7,10 +7,9 @@ using ModelContextProtocol.Server;
 namespace Hermes.Memory.Core.Mcp;
 
 [McpServerToolType]
-public sealed class MetricsTools
+public sealed class MetricsTools(MetricsRepository repo)
 {
-    private readonly MetricsRepository _repo;
-    public MetricsTools(MetricsRepository repo) => _repo = repo;
+    private readonly MetricsRepository _repo = repo;
 
     [McpServerTool(Name = "metrics_record"), Description("Record one metric sample. Use sparingly — prefer metrics_record_batch for >10 samples.")]
     public async Task<string> Record(
@@ -35,7 +34,7 @@ public sealed class MetricsTools
         CancellationToken ct = default)
     {
         var fromDt = from is null ? DateTime.UtcNow.AddHours(-1) : DateTime.Parse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-        var toDt   = to   is null ? DateTime.UtcNow            : DateTime.Parse(to,   CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        var toDt = to is null ? DateTime.UtcNow : DateTime.Parse(to, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
         var rows = await _repo.QueryAsync(profile, metric_name, fromDt, toDt, bucket, top_n, ct);
         return JsonSerializer.Serialize(rows, JsonOpts);
     }

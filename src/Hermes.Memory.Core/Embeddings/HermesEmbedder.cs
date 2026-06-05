@@ -135,10 +135,10 @@ public sealed class HermesEmbedder
     {
         return Provider switch
         {
-            "kimi"         => await EmbedOpenAiCompatAsync(text, ct),
+            "kimi" => await EmbedOpenAiCompatAsync(text, ct),
             "ollama_local" => await EmbedOllamaAsync(text, ct),
-            "openai"       => await EmbedOpenAiCompatAsync(text, ct),
-            "noop"         => new float[Dim],
+            "openai" => await EmbedOpenAiCompatAsync(text, ct),
+            "noop" => new float[Dim],
             _ => throw new NotSupportedException($"Embedder provider '{Provider}' is not registered.")
         };
     }
@@ -174,16 +174,16 @@ public sealed class HermesEmbedder
 
     private static string DefaultBaseUrl(string provider) => provider switch
     {
-        "kimi"         => "https://api.kimi.com/coding/v1",
+        "kimi" => "https://api.kimi.com/coding/v1",
         // Ollama local port: regular + 5000 = 16434. Override with
         // HERMES_OLLAMA_HOST_PORT. Falls back to 11434 (legacy).
         "ollama_local" => $"http://localhost:{ResolveOllamaPort()}",
-        "openai"       => "https://api.openai.com/v1",
+        "openai" => "https://api.openai.com/v1",
         // "noop" is a test/local provider that returns zero vectors without
         // hitting the network. It needs a non-null baseUrl only because the
         // embedder HTTP code path dereferences it; an empty string is the
         // cheapest sentinel that satisfies the type without a real endpoint.
-        "noop"         => string.Empty,
+        "noop" => string.Empty,
         _ => throw new NotSupportedException($"No default base URL for provider '{provider}'")
     };
 

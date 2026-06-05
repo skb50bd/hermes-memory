@@ -12,16 +12,10 @@ namespace Hermes.Memory.Core.Wiki;
 /// in hermes_wiki.document_links and queryable via recursive CTE for
 /// related-document traversal.
 /// </summary>
-public sealed class WikiRepository
+public sealed class WikiRepository(HermesDataSource ds, EmbedderRegistry embedders)
 {
-    private readonly HermesDataSource _ds;
-    private readonly EmbedderRegistry _embedders;
-
-    public WikiRepository(HermesDataSource ds, EmbedderRegistry embedders)
-    {
-        _ds = ds;
-        _embedders = embedders;
-    }
+    private readonly HermesDataSource _ds = ds;
+    private readonly EmbedderRegistry _embedders = embedders;
 
     /// <summary>
     /// Create or update a document by slug. Idempotent: re-creating an
@@ -31,7 +25,7 @@ public sealed class WikiRepository
     {
         var embedder = _embedders.GetDefault();
         var vec = await embedder.EmbedAsync(bodyMd, ct);
-        var dim = embedder.Dim;
+        _ = embedder.Dim;
 
         await using var conn = await _ds.OpenConnectionAsync(ct);
         await using var cmd = new NpgsqlCommand(

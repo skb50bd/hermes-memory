@@ -81,17 +81,15 @@ public sealed class WikiRepositoryTests : IAsyncLifetime
                 throw new InvalidOperationException(
                     $"no migration files found in {migrationsDir}");
             }
-            await using (var conn = new NpgsqlConnection(raw))
+            await using var conn = new NpgsqlConnection(raw);
+            await conn.OpenAsync();
+            foreach (var ext in new[] { "vector", "pg_trgm", "ltree" })
             {
-                await conn.OpenAsync();
-                foreach (var ext in new[] { "vector", "pg_trgm", "ltree" })
-                {
-                    await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
-                    await extCmd.ExecuteNonQueryAsync();
-                }
-                await using var cmd = new NpgsqlCommand(inlineSql.ToString(), conn);
-                await cmd.ExecuteNonQueryAsync();
+                await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
+                await extCmd.ExecuteNonQueryAsync();
             }
+            await using var cmd = new NpgsqlCommand(inlineSql.ToString(), conn);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         _ds = new NpgsqlDataSourceBuilder(raw).Build();

@@ -15,10 +15,9 @@ namespace Hermes.Memory.Core.Mcp;
 /// SELECT ... FOR UPDATE SKIP LOCKED inside the repo.
 /// </summary>
 [McpServerToolType]
-public sealed class KanbanTools
+public sealed class KanbanTools(KanbanRepository repo)
 {
-    private readonly KanbanRepository _repo;
-    public KanbanTools(KanbanRepository repo) => _repo = repo;
+    private readonly KanbanRepository _repo = repo;
 
     // ===== Tenants =====
 
@@ -107,8 +106,8 @@ public sealed class KanbanTools
         var all = await _repo.ListTasksAsync(tenant_slug, limit: 500, ct: ct);
         var q = query.ToLowerInvariant();
         var hits = all.Where(t =>
-            (t.Title?.ToLowerInvariant().Contains(q) ?? false) ||
-            (t.Body?.ToLowerInvariant().Contains(q) ?? false))
+            (t.Title?.ToLowerInvariant().Contains(q, StringComparison.InvariantCultureIgnoreCase) ?? false) ||
+            (t.Body?.ToLowerInvariant().Contains(q, StringComparison.InvariantCultureIgnoreCase) ?? false))
             .Take(limit)
             .ToList();
         return JsonSerializer.Serialize(hits, JsonOpts);

@@ -6,10 +6,9 @@ using ModelContextProtocol.Server;
 namespace Hermes.Memory.Core.Mcp;
 
 [McpServerToolType]
-public sealed class JournalTools
+public sealed class JournalTools(JournalRepository repo)
 {
-    private readonly JournalRepository _repo;
-    public JournalTools(JournalRepository repo) => _repo = repo;
+    private readonly JournalRepository _repo = repo;
 
     [McpServerTool(Name = "journal_log_session"), Description("Open a new conversation session. Returns the session id.")]
     public async Task<string> LogSession(

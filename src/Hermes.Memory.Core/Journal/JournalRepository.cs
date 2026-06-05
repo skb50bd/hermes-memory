@@ -15,10 +15,9 @@ namespace Hermes.Memory.Core.Journal;
 /// by session_id first and time second. The hermes_metrics schema is
 /// for actual timeseries.
 /// </summary>
-public sealed class JournalRepository
+public sealed class JournalRepository(HermesDataSource ds)
 {
-    private readonly HermesDataSource _ds;
-    public JournalRepository(HermesDataSource ds) => _ds = ds;
+    private readonly HermesDataSource _ds = ds;
 
     public async Task<long> OpenSessionAsync(string profile, string? metadataJson = null, CancellationToken ct = default)
     {

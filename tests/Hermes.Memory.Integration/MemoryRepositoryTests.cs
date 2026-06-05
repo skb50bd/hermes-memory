@@ -80,19 +80,15 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
                     ON agent_memory.memories (md5(content), COALESCE(source, ''))
                     WHERE deleted_at IS NULL;
                 """);
-            await using (var conn = new NpgsqlConnection(raw))
+            await using var conn = new NpgsqlConnection(raw);
+            await conn.OpenAsync();
+            foreach (var ext in new[] { "vector", "pg_trgm", "ltree" })
             {
-                await conn.OpenAsync();
-                foreach (var ext in new[] { "vector", "pg_trgm", "ltree" })
-                {
-                    await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
-                    await extCmd.ExecuteNonQueryAsync();
-                }
-                await using (var cmd = new NpgsqlCommand(inlineSql.ToString(), conn))
-                {
-                    await cmd.ExecuteNonQueryAsync();
-                }
+                await using var extCmd = new NpgsqlCommand($"CREATE EXTENSION IF NOT EXISTS \"{ext}\"", conn);
+                await extCmd.ExecuteNonQueryAsync();
             }
+            await using var cmd = new NpgsqlCommand(inlineSql.ToString(), conn);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         _ds = new NpgsqlDataSourceBuilder(raw).Build();
@@ -123,7 +119,7 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
         var unique = Guid.NewGuid().ToString("N")[..8];
         var id = await _repo.RememberAsync(
             content: $"User prefers Postgres over MySQL for new projects ({unique})",
-            tags: new[] { "preferences", "databases" },
+            tags: ["preferences", "databases"],
             category: "preferences",
             source: "test");
         Assert.True(id > 0);
@@ -137,7 +133,7 @@ public sealed class MemoryRepositoryTests : IAsyncLifetime
     public async Task Forget_Sets_DeletedAt_And_Excludes_From_Search()
     {
         var unique = Guid.NewGuid().ToString("N")[..8];
-        var id = await _repo.RememberAsync($"delete me ephemeral test content ({unique})", tags: new[] { "ephemeral" });
+        var id = await _repo.RememberAsync($"delete me ephemeral test content ({unique})", tags: ["ephemeral"]);
         Assert.True(id > 0);
         Assert.True(await _repo.ForgetAsync(id));
         var hits = await _repo.SearchAsync($"delete me ephemeral {unique}", topK: 5);

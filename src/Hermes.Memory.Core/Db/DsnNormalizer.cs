@@ -124,8 +124,8 @@ public static class DsnNormalizer
                     }
                     else
                     {
-                        p.Username = HttpUtility.UrlDecode(uri.UserInfo.Substring(0, sep));
-                        p.Password = HttpUtility.UrlDecode(uri.UserInfo.Substring(sep + 1));
+                        p.Username = HttpUtility.UrlDecode(uri.UserInfo[..sep]);
+                        p.Password = HttpUtility.UrlDecode(uri.UserInfo[(sep + 1)..]);
                     }
                 }
                 // Pull known query params
@@ -141,26 +141,26 @@ public static class DsnNormalizer
 
         // Form 3: ADO-style semicolon-separated (must be checked BEFORE
         // form 2, because libpq form has no semicolons but ADO does).
-        if (raw.Contains(";"))
+        if (raw.Contains(';'))
         {
             foreach (var part in raw.Split(';'))
             {
                 var eq = part.IndexOf('=');
                 if (eq < 0) continue;
-                var k = part.Substring(0, eq).Trim();
-                var v = part.Substring(eq + 1).Trim();
+                var k = part[..eq].Trim();
+                var v = part[(eq + 1)..].Trim();
                 ApplyKey(k, v, p);
             }
             return p;
         }
 
         // Form 2: libpq key=value (whitespace-separated)
-        foreach (var part in raw.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var part in raw.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries))
         {
             var eq = part.IndexOf('=');
             if (eq < 0) continue;
-            var k = part.Substring(0, eq).Trim();
-            var v = part.Substring(eq + 1).Trim();
+            var k = part[..eq].Trim();
+            var v = part[(eq + 1)..].Trim();
             ApplyKey(k, v, p);
         }
         return p;

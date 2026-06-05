@@ -18,10 +18,9 @@ namespace Hermes.Memory.Core.Kanban;
 /// A "board" is a tenant. Cross-tenant list goes through v_board_tasks
 /// or the tenants table. Per-tenant list filters on tenant_id.
 /// </summary>
-public sealed class KanbanRepository
+public sealed class KanbanRepository(HermesDataSource ds)
 {
-    private readonly HermesDataSource _ds;
-    public KanbanRepository(HermesDataSource ds) => _ds = ds;
+    private readonly HermesDataSource _ds = ds;
 
     // ====================================================================
     // Tenants
@@ -500,36 +499,36 @@ public sealed class KanbanRepository
     // ====================================================================
 
     private static KanbanTask ReadTask(NpgsqlDataReader r) => new(
-        Id:               r.GetString(0),
-        TenantId:         r.GetInt64(1),
-        TenantSlug:       r.GetString(2),
-        Title:            r.GetString(3),
-        Body:             r.IsDBNull(4) ? null : r.GetString(4),
-        Assignee:         r.IsDBNull(5) ? null : r.GetString(5),
-        Status:           r.GetString(6),
-        Priority:         r.GetInt32(7),
-        CreatedBy:        r.IsDBNull(8) ? null : r.GetString(8),
-        CreatedAt:        r.GetFieldValue<DateTime>(9),
-        StartedAt:        r.IsDBNull(10) ? null : r.GetFieldValue<DateTime>(10),
-        CompletedAt:      r.IsDBNull(11) ? null : r.GetFieldValue<DateTime>(11),
-        WorkspaceKind:    r.GetString(12),
-        WorkspacePath:    r.IsDBNull(13) ? null : r.GetString(13),
-        BranchName:       r.IsDBNull(14) ? null : r.GetString(14),
-        Result:           r.IsDBNull(15) ? null : r.GetString(15),
+        Id: r.GetString(0),
+        TenantId: r.GetInt64(1),
+        TenantSlug: r.GetString(2),
+        Title: r.GetString(3),
+        Body: r.IsDBNull(4) ? null : r.GetString(4),
+        Assignee: r.IsDBNull(5) ? null : r.GetString(5),
+        Status: r.GetString(6),
+        Priority: r.GetInt32(7),
+        CreatedBy: r.IsDBNull(8) ? null : r.GetString(8),
+        CreatedAt: r.GetFieldValue<DateTime>(9),
+        StartedAt: r.IsDBNull(10) ? null : r.GetFieldValue<DateTime>(10),
+        CompletedAt: r.IsDBNull(11) ? null : r.GetFieldValue<DateTime>(11),
+        WorkspaceKind: r.GetString(12),
+        WorkspacePath: r.IsDBNull(13) ? null : r.GetString(13),
+        BranchName: r.IsDBNull(14) ? null : r.GetString(14),
+        Result: r.IsDBNull(15) ? null : r.GetString(15),
         ConsecutiveFailures: r.GetInt32(16),
-        WorkerPid:        r.IsDBNull(17) ? null : r.GetInt32(17),
+        WorkerPid: r.IsDBNull(17) ? null : r.GetInt32(17),
         LastFailureError: r.IsDBNull(18) ? null : r.GetString(18),
         MaxRuntimeSeconds: r.IsDBNull(19) ? null : r.GetInt32(19),
-        LastHeartbeatAt:  r.IsDBNull(20) ? null : r.GetFieldValue<DateTime>(20),
-        CurrentRunId:     r.IsDBNull(21) ? null : r.GetInt64(21),
+        LastHeartbeatAt: r.IsDBNull(20) ? null : r.GetFieldValue<DateTime>(20),
+        CurrentRunId: r.IsDBNull(21) ? null : r.GetInt64(21),
         WorkflowTemplateId: r.IsDBNull(22) ? null : r.GetString(22),
-        CurrentStepKey:   r.IsDBNull(23) ? null : r.GetString(23),
-        SkillsJson:       r.IsDBNull(24) ? "[]" : r.GetString(24),
-        ModelOverride:    r.IsDBNull(25) ? null : r.GetString(25),
-        MaxRetries:       r.IsDBNull(26) ? null : r.GetInt32(26),
-        SessionId:        r.IsDBNull(27) ? null : r.GetString(27),
-        GoalMode:         r.GetInt32(28),
-        GoalMaxTurns:     r.IsDBNull(29) ? null : r.GetInt32(29));
+        CurrentStepKey: r.IsDBNull(23) ? null : r.GetString(23),
+        SkillsJson: r.IsDBNull(24) ? "[]" : r.GetString(24),
+        ModelOverride: r.IsDBNull(25) ? null : r.GetString(25),
+        MaxRetries: r.IsDBNull(26) ? null : r.GetInt32(26),
+        SessionId: r.IsDBNull(27) ? null : r.GetString(27),
+        GoalMode: r.GetInt32(28),
+        GoalMaxTurns: r.IsDBNull(29) ? null : r.GetInt32(29));
 
     private static async Task InsertRunAndEventAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx,
@@ -552,16 +551,14 @@ public sealed class KanbanRepository
             ins.Parameters.AddWithValue("err", (object?)error ?? DBNull.Value);
             runId = (long)(await ins.ExecuteScalarAsync(ct))!;
         }
-        await using (var ev = new NpgsqlCommand(
+        await using var ev = new NpgsqlCommand(
             "INSERT INTO hermes_kanban.task_events (task_id, run_id, kind, payload) " +
-            "VALUES (@t, @r, @k, @p::jsonb)", conn, tx))
-        {
-            ev.Parameters.AddWithValue("t", taskId);
-            ev.Parameters.AddWithValue("r", runId);
-            ev.Parameters.AddWithValue("k", status);
-            ev.Parameters.AddWithValue("p", "{}");
-            await ev.ExecuteNonQueryAsync(ct);
-        }
+            "VALUES (@t, @r, @k, @p::jsonb)", conn, tx);
+        ev.Parameters.AddWithValue("t", taskId);
+        ev.Parameters.AddWithValue("r", runId);
+        ev.Parameters.AddWithValue("k", status);
+        ev.Parameters.AddWithValue("p", "{}");
+        await ev.ExecuteNonQueryAsync(ct);
     }
 }
 
