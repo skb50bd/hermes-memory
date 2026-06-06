@@ -33,3 +33,5 @@ Thumbs.db
 # Tooling caches
 .audit/
 **/__pycache__/
+src/hermes_memory.egg-info/
+uv.lock

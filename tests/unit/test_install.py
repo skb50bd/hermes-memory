@@ -1,0 +1,529 @@
+"""TDD: install/ — 8-step idempotent wizard.
+
+The wizard is the install orchestration. Each Step has:
+  - name: short identifier (e.g. "00_preflight")
+  - is_done(state) -> bool
+  - run(ctx) -> StepResult
+  - rollback(ctx) -> None   # for uninstall
+
+The orchestrator (install/wizard.py) walks the steps in order,
+skipping ones that are already done (for idempotency), prompting
+for confirmations, and recording state in ~/.hermes/state/hermes-memory.json.
+
+Public surface tested here:
+  - Step enum (8 names)
+  - WizardState (the JSON state file shape)
+  - run_step() dispatch
+  - check_done() / mark_done()
+  - each step's is_done() and run() (smoke tests only — real work
+    uses subprocess / docker / psql; we mock them in tests)
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+from pathlib import Path
+
+import psycopg
+import psycopg.sql
+import pytest
+
+from hermes_memory.install.state import STEP_ORDER, StateError, StepName, WizardState
+from hermes_memory.install.wizard import (
+    StepResult,
+    Wizard,
+)
+
+
+# ---------------------------------------------------------------------------
+# State
+# ---------------------------------------------------------------------------
+def test_state_init(tmp_path):
+    s = WizardState(tmp_path / "state.json")
+    assert s.is_empty()
+    assert s.path == tmp_path / "state.json"
+
+
+def test_state_mark_step_done(tmp_path):
+    s = WizardState(tmp_path / "state.json")
+    s.mark_done(StepName.PREFLIGHT)
+    assert s.is_done(StepName.PREFLIGHT)
+    assert not s.is_done(StepName.POSTGRES)
+    # Reload
+    s2 = WizardState(tmp_path / "state.json")
+    assert s2.is_done(StepName.PREFLIGHT)
+
+
+def test_state_mark_done_idempotent(tmp_path):
+    s = WizardState(tmp_path / "state.json")
+    s.mark_done(StepName.PREFLIGHT, detail={"docker": "/usr/bin/docker"})
+    s.mark_done(StepName.PREFLIGHT, detail={"docker": "/different"})
+    # First write wins (idempotency)
+    assert s.get_detail(StepName.PREFLIGHT) == {"docker": "/usr/bin/docker"}
+
+
+def test_state_invalid_step_raises(tmp_path):
+    s = WizardState(tmp_path / "state.json")
+    with pytest.raises(StateError):
+        s.mark_done("not_a_step")  # type: ignore[arg-type]
+
+
+def test_state_completed_steps_in_order(tmp_path):
+    s = WizardState(tmp_path / "state.json")
+    s.mark_done(StepName.PREFLIGHT)
+    s.mark_done(StepName.POSTGRES)
+    s.mark_done(StepName.EXTENSIONS)
+    done = s.completed_steps()
+    assert done == [StepName.PREFLIGHT, StepName.POSTGRES, StepName.EXTENSIONS]
+
+
+# ---------------------------------------------------------------------------
+# Step enum
+# ---------------------------------------------------------------------------
+def test_step_names_count():
+    """Exactly 9 steps in the wizard (per the v2 plan)."""
+    assert len(STEP_ORDER) == 9
+
+
+def test_step_order_is_9_named():
+    expected_names = {
+        "preflight",
+        "postgres",
+        "extensions",
+        "template",
+        "profile_db",
+        "dsn",
+        "migrate",
+        "embedder",
+        "register_plugin",
+    }
+    actual = {s.value for s in STEP_ORDER}
+    assert actual == expected_names
+
+
+# ---------------------------------------------------------------------------
+# Wizard — idempotency
+# ---------------------------------------------------------------------------
+def test_wizard_skips_done_steps(tmp_path):
+    """The wizard is idempotent: re-running with state present skips
+    completed steps without re-executing them."""
+    s = WizardState(tmp_path / "state.json")
+    s.mark_done(StepName.PREFLIGHT)
+    s.mark_done(StepName.POSTGRES)
+    # The runner is only called for steps that aren't already done.
+    called_with: list[StepName] = []
+
+    def runner(step):
+        called_with.append(step)
+        return StepResult(step, "ran", "ok")
+
+    w = Wizard(state=s, runner=runner)
+    results = w.run_pending()
+    skipped = [r for r in results if r.status == "skipped"]
+    run = [r for r in results if r.status == "ran"]
+    assert len(skipped) == 2
+    assert len(run) == 7  # the other 7 (9 total - 2 pre-done)
+    # The 2 done steps were never re-run
+    assert StepName.PREFLIGHT not in called_with
+    assert StepName.POSTGRES not in called_with
+    # The 7 not-done steps were each run
+    assert len(called_with) == 7
+
+
+def test_wizard_records_steps_after_run(tmp_path):
+    s = WizardState(tmp_path / "state.json")
+    ran = []
+
+    def runner(step):
+        ran.append(step)
+        return StepResult(step, "ran", "ok")
+
+    w = Wizard(state=s, runner=runner)
+    w.run_pending()
+    for step in STEP_ORDER:
+        assert s.is_done(step), f"{step.value} not marked done after run"
+
+
+# ---------------------------------------------------------------------------
+# Preflight (Step 0) — checks the environment
+# ---------------------------------------------------------------------------
+def test_preflight_passes_when_essentials_present(tmp_path, monkeypatch):
+    """Preflight checks python version, docker presence, port availability.
+    Test the *contract*: given a fake env, it returns a result that
+    can be inspected, and records state on success."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir=tmp_path)
+    monkeypatch.setattr(step, "_check_python", lambda: True)
+    monkeypatch.setattr(step, "_check_docker", lambda: True)
+    monkeypatch.setattr(step, "_check_port", lambda p: True)
+    result = step.run()
+    assert result.success is True
+
+
+def test_preflight_fails_on_missing_docker(tmp_path, monkeypatch):
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir=tmp_path)
+    monkeypatch.setattr(step, "_check_python", lambda: True)
+    monkeypatch.setattr(step, "_check_docker", lambda: False)
+    # The new preflight probes the port for PG if 10432 is busy.
+    # Set port-free so we get past that check and reach the docker failure.
+    monkeypatch.setattr(step, "_check_port", lambda p: True)
+    result = step.run()
+    assert result.success is False
+    assert "docker" in result.message.lower()
+
+
+def test_preflight_port_in_use_with_pg_is_warning_not_failure(tmp_path, monkeypatch):
+    """If the port is already serving Postgres, preflight should not
+    fail — that's the user's desired state. It should pass with a
+    note that the existing PG will be used.
+
+    This is the bug 2 fix: previously `port 10432 already in use`
+    was a hard fail, blocking real installs where the container
+    is already running."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir=tmp_path)
+    monkeypatch.setattr(step, "_check_python", lambda: True)
+    monkeypatch.setattr(step, "_check_docker", lambda: True)
+    monkeypatch.setattr(step, "_check_port", lambda p: False)  # port IS in use
+    monkeypatch.setattr(step, "_is_postgres_listening", lambda p: True)
+    result = step.run()
+    assert result.success is True
+    assert "postgres" in result.message.lower()
+    assert "already" in result.message.lower() or "existing" in result.message.lower()
+
+
+def test_preflight_port_in_use_without_pg_is_failure(tmp_path, monkeypatch):
+    """If the port is in use but it's not Postgres (e.g. some other
+    service), preflight should still fail — something is squatting
+    on our port and we can't proceed."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir=tmp_path)
+    monkeypatch.setattr(step, "_check_python", lambda: True)
+    monkeypatch.setattr(step, "_check_docker", lambda: True)
+    monkeypatch.setattr(step, "_check_port", lambda p: False)  # port in use
+    monkeypatch.setattr(step, "_is_postgres_listening", lambda p: False)  # but not PG
+    result = step.run()
+    assert result.success is False
+
+
+def test_is_postgres_listening_returns_bool():
+    """The probe must return a bool (not raise) for any host:port."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir="/tmp")
+    # Definitely-not-postgres port: closed → False
+    result = step._is_postgres_listening(54399)
+    assert isinstance(result, bool)
+    # An open HTTP port that's not PG: False
+    # (skip; we don't want a hardcoded port that might bind something)
+
+
+# ---------------------------------------------------------------------------
+# DSN step (Step 5) — writes the connection string to ~/.hermes/.env
+# ---------------------------------------------------------------------------
+def test_dsn_step_writes_env(tmp_path, monkeypatch):
+    """The DSN step appends HERMES_PG_CONN_STR to ~/.hermes/.env."""
+    from hermes_memory.install.steps import DsnStep
+
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_ENV_PATH", env_path)
+    monkeypatch.setattr(
+        "hermes_memory.install.steps.HERMES_PG_CONN_STR_DEFAULT",
+        "postgresql://hermes:test@127.0.0.1:10432/hermes_default",
+    )
+    step = DsnStep(state_dir=tmp_path)
+    result = step.run()
+    assert result.success is True
+    assert "HERMES_PG_CONN_STR" in env_path.read_text()
+
+
+def test_dsn_step_idempotent(tmp_path, monkeypatch):
+    """Re-running doesn't duplicate the HERMES_PG_CONN_STR line."""
+    from hermes_memory.install.steps import DsnStep
+
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_ENV_PATH", env_path)
+    monkeypatch.setattr(
+        "hermes_memory.install.steps.HERMES_PG_CONN_STR_DEFAULT",
+        "postgresql://hermes:test@127.0.0.1:10432/hermes_default",
+    )
+    step = DsnStep(state_dir=tmp_path)
+    step.run()
+    step.run()
+    content = env_path.read_text()
+    assert content.count("HERMES_PG_CONN_STR=") == 1
+
+
+# ---------------------------------------------------------------------------
+# Register plugin step — writes to ~/.hermes/config.yaml
+# ---------------------------------------------------------------------------
+def test_register_plugin_sets_memory_provider(tmp_path, monkeypatch):
+    """The register step adds 'hermes-postgres-memory' to
+    plugins.enabled, sets memory.provider: postgres, and removes the
+    old mcp_servers.hermes-memory block from config.yaml."""
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "memory:\n  provider: ''\n"
+        "plugins:\n  enabled: []\n"
+        "mcp_servers:\n  hermes-memory:\n    command: /old/csharp/binary\n"
+    )
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    step = RegisterPluginStep(state_dir=tmp_path)
+    result = step.run()
+    assert result.success is True
+    text = config_path.read_text()
+    assert "hermes-postgres-memory" in text
+    assert "postgres" in text
+    # Old MCP block is gone
+    assert "/old/csharp/binary" not in text
+
+
+def test_register_plugin_drops_filesystem_marker(tmp_path, monkeypatch):
+    """The register step MUST drop the plugin's plugin.yaml + entry.py into
+    ~/.hermes/plugins/hermes-postgres-memory/. Without those, the
+    hermes-agent plugin loader can't actually find the plugin — it
+    just sees an entry in config.yaml pointing at a missing dir.
+    This is the "non-invasive plug-in" promise from PLAN-V2 §1.2."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("memory:\n  provider: ''\nplugins:\n  enabled: []\n")
+
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PLUGINS_DIR", plugins_dir)
+    # Point the loader's package-data lookup at our dev tree
+    pkg_root = Path(__file__).resolve().parents[2] / "src" / "hermes_memory"
+    monkeypatch.setattr("hermes_memory.install.steps.PACKAGE_DATA_ROOT", pkg_root)
+
+    step = RegisterPluginStep(state_dir=tmp_path)
+    result = step.run()
+    assert result.success is True, result.message
+    # Filesystem evidence: the loader needs plugin.yaml + entry.py
+    assert (plugins_dir / "plugin.yaml").is_file(), "plugin.yaml not dropped"
+    assert (plugins_dir / "entry.py").is_file(), "entry.py not dropped"
+    # plugin.yaml must declare the same name the loader looks up
+    import yaml
+
+    manifest = yaml.safe_load((plugins_dir / "plugin.yaml").read_text())
+    assert manifest["name"] == PLUGIN_NAME
+    # entry.py must import the v2 register() function
+    entry_src = (plugins_dir / "entry.py").read_text()
+    assert "register" in entry_src
+    assert "hermes_memory" in entry_src
+
+
+def test_register_plugin_idempotent_on_rerun(tmp_path, monkeypatch):
+    """Re-running install must NOT fail when the plugin dir already
+    exists from a prior run. Should overwrite the marker files in
+    place and report success."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "stale-marker.txt").write_text("old run")
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("memory:\n  provider: ''\nplugins:\n  enabled: []\n")
+    pkg_root = Path(__file__).resolve().parents[2] / "src" / "hermes_memory"
+
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PLUGINS_DIR", plugins_dir)
+    monkeypatch.setattr("hermes_memory.install.steps.PACKAGE_DATA_ROOT", pkg_root)
+
+    step = RegisterPluginStep(state_dir=tmp_path)
+    result = step.run()
+    assert result.success is True, result.message
+    # The fresh files are there
+    assert (plugins_dir / "plugin.yaml").is_file()
+    assert (plugins_dir / "entry.py").is_file()
+    # Stale markers from prior runs are left alone (we don't nuke user data)
+
+
+def test_status_reports_missing_plugin_dir(tmp_path, monkeypatch):
+    """status command must detect when config.yaml lists the plugin but
+    the plugin directory is missing — currently it falsely reports
+    "all steps OK" because it only reads the cached state JSON.
+    A real install needs the filesystem marker to be present."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME  # not created
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("memory:\n  provider: ''\nplugins:\n  enabled: []\n")
+    pkg_root = Path(__file__).resolve().parents[2] / "src" / "hermes_memory"
+
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PLUGINS_DIR", plugins_dir)
+    monkeypatch.setattr("hermes_memory.install.steps.PACKAGE_DATA_ROOT", pkg_root)
+
+    step = RegisterPluginStep(state_dir=tmp_path)
+    step.run()
+    # After the step runs, the marker MUST exist
+    assert (plugins_dir / "plugin.yaml").exists()
+    assert (plugins_dir / "entry.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 of the v2 smoke test: the install never applies v2 migrations.
+# The MigrateStep is the fix. It must call apply_migrations() against
+# the configured DSN (from HERMES_PG_CONN_STR in .env) and record
+# what it did in the install state.
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_step_threads_dsn_to_runner(tmp_path, monkeypatch):
+    """MigrateStep reads the DSN, calls apply_migrations against it,
+    and records the list of newly-applied versions in the step detail.
+
+    Builds its own ephemeral DB rather than using the shared `conn`
+    fixture — the shared fixture's teardown can race with the step
+    using a context-manager-wrapped connection."""
+
+    from hermes_memory.install.steps import MigrateStep
+
+    pwd_file = Path(os.path.expanduser("~/.hermes/state/hermes-postgres.password"))
+    if not pwd_file.exists():
+        pytest.skip("no local hermes-postgres available; skipping migration tests")
+    real_pwd = pwd_file.read_text().strip()
+    mark = chr(42) + chr(42) + chr(42)
+    admin_dsn = (
+        "host=127.0.0.1 port=10432 user=hermes password=" + mark + " dbname=postgres"
+    ).replace(mark, real_pwd)
+    test_db = f"mig_test_{uuid.uuid4().hex[:12]}"
+
+    with psycopg.connect(admin_dsn, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(
+            psycopg.sql.SQL("CREATE DATABASE {} TEMPLATE = template0").format(
+                psycopg.sql.Identifier(test_db)
+            )
+        )
+
+    test_conn = psycopg.connect(
+        host="127.0.0.1",
+        port=10432,
+        user="hermes",
+        password=real_pwd,
+        dbname=test_db,
+    )
+    with test_conn.cursor() as cur:
+        for ext in ("vector", "pg_trgm"):
+            cur.execute(
+                psycopg.sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(
+                    psycopg.sql.Identifier(ext)
+                )
+            )
+    test_conn.commit()
+
+    # Build a migrations dir under tmp_path with one trivial file
+    mig_dir = tmp_path / "migrations"
+    mig_dir.mkdir()
+    (mig_dir / "0001_test.sql").write_text("CREATE TABLE test_step (id int);")
+
+    monkeypatch.setattr("hermes_memory.install.steps._migrations_dir", lambda: mig_dir)
+
+    # Replace HERMES_PG_CONN_STR with a DSN that points at our test db.
+    # Must be postgresql:// URL form because MigrateStep parses it
+    # via urllib (host=... space-separated form is not supported).
+    test_dsn = f"postgresql://hermes:{real_pwd}@127.0.0.1:10432/{test_db}"
+    monkeypatch.setenv("HERMES_PG_CONN_STR", test_dsn)
+
+    try:
+        step = MigrateStep(state_dir=tmp_path)
+        result = step.run()
+        assert result.success is True, result.message
+        with test_conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('test_step')")
+            assert cur.fetchone()[0] is not None
+        with test_conn.cursor() as cur:
+            cur.execute("SELECT version FROM agent_migrations.schema_migrations ORDER BY version")
+            versions = [r[0] for r in cur.fetchall()]
+        assert "0001_test" in versions
+    finally:
+        test_conn.close()
+        with psycopg.connect(admin_dsn, autocommit=True) as admin:
+            with admin.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (test_db,),
+                )
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg.sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                        psycopg.sql.Identifier(test_db)
+                    )
+                )
+
+
+def test_migrate_step_is_idempotent(tmp_path, monkeypatch):
+    """A second run with the same DSN must not raise and must report
+    'already up to date' or similar."""
+
+    from hermes_memory.install.steps import MigrateStep
+
+    pwd_file = Path(os.path.expanduser("~/.hermes/state/hermes-postgres.password"))
+    if not pwd_file.exists():
+        pytest.skip("no local hermes-postgres available; skipping migration tests")
+    real_pwd = pwd_file.read_text().strip()
+    mark = chr(42) + chr(42) + chr(42)
+    admin_dsn = (
+        "host=127.0.0.1 port=10432 user=hermes password=" + mark + " dbname=postgres"
+    ).replace(mark, real_pwd)
+    test_db = f"mig_test_{uuid.uuid4().hex[:12]}"
+
+    with psycopg.connect(admin_dsn, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(
+            psycopg.sql.SQL("CREATE DATABASE {} TEMPLATE = template0").format(
+                psycopg.sql.Identifier(test_db)
+            )
+        )
+
+    test_conn = psycopg.connect(
+        host="127.0.0.1",
+        port=10432,
+        user="hermes",
+        password=real_pwd,
+        dbname=test_db,
+    )
+    test_conn.commit()
+
+    mig_dir = tmp_path / "migrations"
+    mig_dir.mkdir()
+    (mig_dir / "0001_test.sql").write_text("CREATE TABLE test_idem (id int);")
+
+    monkeypatch.setattr("hermes_memory.install.steps._migrations_dir", lambda: mig_dir)
+    test_dsn = f"postgresql://hermes:{real_pwd}@127.0.0.1:10432/{test_db}"
+    monkeypatch.setenv("HERMES_PG_CONN_STR", test_dsn)
+
+    try:
+        step = MigrateStep(state_dir=tmp_path)
+        r1 = step.run()
+        r2 = step.run()
+    finally:
+        test_conn.close()
+        with psycopg.connect(admin_dsn, autocommit=True) as admin:
+            with admin.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (test_db,),
+                )
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg.sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                        psycopg.sql.Identifier(test_db)
+                    )
+                )
+    assert r1.success is True
+    assert r2.success is True

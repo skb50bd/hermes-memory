@@ -1,0 +1,27 @@
+# Build context exclusions for docker buildx.
+# When ci.yml sets `context: .` (so the Dockerfile's `COPY migrations`
+# works), we still want buildx to ignore everything that doesn't end
+# up in the final image. This keeps the build context small and the
+# layer cache stable.
+.git
+.github
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+tests
+docs
+*.md
+!migrations/*.sql
+!docker/postgres/**/*
+!Dockerfile.publish
+CLAUDE.md
+AGENTS.md
+PLAN-*.md
+CHANGELOG.md
