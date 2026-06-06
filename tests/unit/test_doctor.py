@@ -149,3 +149,70 @@ def test_doctor_summary_line_ends_with_severity(
     report = run_doctor(home=tmp_path)
     summary = report.summary_line()
     assert summary.strip().endswith(("OK", "WARN", "FAIL"))
+
+
+def test_doctor_detects_missing_plugin_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the v2 plugin dir under ~/.hermes/plugins/ is missing
+    plugin.yaml or entry.py, the plugin can't actually be loaded by
+    the hermes-agent loader. Doctor must flag this as a WARN with a
+    concrete repair command, NOT silently report OK.
+
+    The plugin dir doesn't exist at all by default; doctor should
+    still flag it because state says register_plugin is done (a state
+    file is created in the helper below)."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.state import StepName, WizardState
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    _write(
+        tmp_path / ".env",
+        'HERMES_PG_CONN_STR="postgresql://hermes:***@127.0.0.1:10432/hermes_default"',
+    )
+    _pwd_file(tmp_path, "hermes-postgres.password", "PW123")
+    # Mark the register_plugin step as done in state so the filesystem
+    # check is meaningful
+    state = WizardState(tmp_path / "state" / "hermes-memory.json")
+    state.mark_done(StepName.REGISTER_PLUGIN, detail={"message": "ok"})
+
+    # Plugin dir intentionally does NOT exist
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME
+    assert not plugins_dir.exists()
+
+    report = run_doctor(home=tmp_path, pg_check=False, embedder_check=False)
+    codes = {i.code for i in report.issues}
+    assert "PLUGIN_ASSETS_MISSING" in codes, f"got: {codes}"
+    miss = next(i for i in report.issues if i.code == "PLUGIN_ASSETS_MISSING")
+    assert miss.severity == Severity.WARN
+    assert "install --step 7" in miss.fix_hint or "install" in miss.fix_hint
+
+
+def test_doctor_heals_missing_plugin_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run_doctor(..., heal=True)` with a missing plugin dir: drops
+    plugin.yaml + entry.py from the v2 package and marks the issue
+    as PLUGIN_ASSETS_HEALED."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.state import StepName, WizardState
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    _write(
+        tmp_path / ".env",
+        'HERMES_PG_CONN_STR="postgresql://hermes:***@127.0.0.1:10432/hermes_default"',
+    )
+    _pwd_file(tmp_path, "hermes-postgres.password", "PW123")
+    state = WizardState(tmp_path / "state" / "hermes-memory.json")
+    state.mark_done(StepName.REGISTER_PLUGIN, detail={"message": "ok"})
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME
+    assert not plugins_dir.exists()
+
+    report = run_doctor(home=tmp_path, heal=True, pg_check=False, embedder_check=False)
+    # The plugin dir was created and the files dropped
+    assert (plugins_dir / "plugin.yaml").is_file()
+    assert (plugins_dir / "entry.py").is_file()
+    # The issue was marked healed
+    healed = [i for i in report.issues if i.code == "PLUGIN_ASSETS_HEALED"]
+    assert healed, f"expected PLUGIN_ASSETS_HEALED, got: {report.issues}"

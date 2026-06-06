@@ -12,7 +12,9 @@ Public surface — 8 step classes, one per StepName:
   ProfileDbStep       — clones hermes_template → hermes_<profile>
   DsnStep             — writes HERMES_PG_CONN_STR to ~/.hermes/.env
   EmbedderStep        — verifies the embedder is reachable
-  RegisterPluginStep  — wires config.yaml + plugins.enabled
+  RegisterPluginStep  — wires config.yaml + plugins.enabled + drops
+                        the v2 plugin files into
+                        ~/.hermes/plugins/hermes-postgres-memory/
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -35,6 +38,12 @@ from hermes_memory.install.paths import (
     PLUGIN_NAME,
 )
 from hermes_memory.install.state import StepName, StepResult
+
+# Path to the v2 package's bundled assets (plugin.yaml, entry.py) that
+# get dropped into ~/.hermes/plugins/<PLUGIN_NAME>/ at install time.
+# Tests override this; production resolves to the installed package
+# data via importlib.resources.
+PACKAGE_DATA_ROOT = Path(str(resources.files("hermes_memory")))
 
 # ---------------------------------------------------------------------------
 # Back-compat re-exports — `from hermes_memory.install.steps import HERMES_HOME`
@@ -214,7 +223,37 @@ class RegisterPluginStep(_BaseStep):
             del mcp["hermes-memory"]
 
         self._save_config(cfg)
+
+        # 4) Drop the v2 plugin files into ~/.hermes/plugins/<PLUGIN_NAME>/
+        # This is what makes the plugin actually loadable. config.yaml alone
+        # is not enough — the hermes-agent loader looks for plugin.yaml +
+        # entry.py on disk. PLAN-V2 §1.2 calls this the "non-invasive
+        # plug-in" promise.
+        self._drop_plugin_assets()
+
         return self._result(
             True,
-            f"registered {PLUGIN_NAME} in config.yaml; removed old mcp_servers block",
+            f"registered {PLUGIN_NAME} in config.yaml; dropped plugin assets at {HERMES_PLUGINS_DIR}",
         )
+
+    def _drop_plugin_assets(self) -> None:
+        """Copy plugin.yaml + entry.py from the v2 package into the
+        user's plugins directory. Idempotent — overwrites in place.
+
+        Why a thin entry.py shim instead of an editable install + symlink?
+        - editable installs / symlinks touch ~/.hermes/hermes-agent/'s
+          working tree, which `hermes update` then flags as dirty
+        - a shim file in the user-plugins dir is invisible to `hermes update`
+          and survives a clean re-install
+        """
+        HERMES_PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
+        for asset in ("plugin.yaml", "entry.py"):
+            src = PACKAGE_DATA_ROOT / asset
+            dst = HERMES_PLUGINS_DIR / asset
+            if not src.is_file():
+                # Don't silently skip — surface the bug loudly.
+                raise FileNotFoundError(
+                    f"v2 install asset missing: {src} "
+                    f"(expected to be shipped inside the hermes_memory package)"
+                )
+            shutil.copy2(src, dst)

@@ -16,6 +16,7 @@ import yaml
 from hermes_memory import __version__
 from hermes_memory.install.state import (
     HERMES_HOME,
+    HERMES_PLUGINS_DIR,
     HERMES_STATE_PATH,
     STEP_ORDER,
     StepName,
@@ -609,13 +610,33 @@ def _unregister_plugin() -> None:
 def _run_status() -> int:
     state = WizardState(HERMES_STATE_PATH)
     print("hermes-memory install state:")
+    completed = set()
     if state.is_empty():
         print("  (no state file — nothing installed yet)")
     else:
         for step in state.completed_steps():
+            completed.add(step)
             detail = state.get_detail(step)
             msg = detail.get("message", "") if isinstance(detail, dict) else ""
             print(f"  ✓ {step.value}{(': ' + msg) if msg else ''}")
+
+    # Filesystem truth check: state JSON can claim "done" but if the
+    # plugin dir is missing on disk, the agent can't actually load the
+    # plugin. Surface the discrepancy here so users don't get a false
+    # "everything's fine" reading.
+    if StepName.REGISTER_PLUGIN in completed:
+        if not (HERMES_PLUGINS_DIR / "plugin.yaml").is_file():
+            print(
+                f"  ! {StepName.REGISTER_PLUGIN.value}: state says done but "
+                f"{HERMES_PLUGINS_DIR / 'plugin.yaml'} is missing — "
+                f"run `hermes-memory install --step 7` to repair"
+            )
+        if not (HERMES_PLUGINS_DIR / "entry.py").is_file():
+            print(
+                f"  ! {StepName.REGISTER_PLUGIN.value}: state says done but "
+                f"{HERMES_PLUGINS_DIR / 'entry.py'} is missing — "
+                f"run `hermes-memory install --step 7` to repair"
+            )
 
     dsn = os.environ.get("HERMES_PG_CONN_STR", "")
     print(f"\nHERMES_PG_CONN_STR: {dsn[:50] + '...' if len(dsn) > 50 else dsn or '(not set)'}")

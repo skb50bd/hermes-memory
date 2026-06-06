@@ -19,7 +19,19 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from hermes_memory.install.paths import PLUGIN_NAME  # noqa: F401
+from hermes_memory.install.state import StepName, WizardState
+
 REDACTED = chr(42) * 3  # the literal 3-char marker; built programmatically
+
+
+# The module-level HERMES_PLUGINS_DIR is frozen at import time. The
+# runtime HERMES_HOME env var may be different (tests, profile override,
+# hermes-agent launch). Helpers that need the live value must call this
+# instead of importing the constant.
+def _live_plugins_dir() -> Path:
+    home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+    return home / "plugins" / PLUGIN_NAME
 
 
 class Severity(str, Enum):
@@ -275,6 +287,59 @@ def _check_embedder(home: Path, report: DoctorReport) -> None:
         )
 
 
+def _check_plugin_assets(home: Path, report: DoctorReport) -> None:
+    """Verify the v2 plugin files (plugin.yaml + entry.py) are on disk
+    under ~/.hermes/plugins/<PLUGIN_NAME>/. The hermes-agent plugin
+    loader cannot load the plugin without them; config.yaml alone is
+    not enough.
+
+    Only flags the issue when the register_plugin step is marked done
+    in the state file — otherwise we're being noisy during a fresh
+    install that's mid-wizard."""
+    state_path = home / "state" / "hermes-memory.json"
+    if not state_path.exists():
+        return
+    state = WizardState(state_path)
+    if not state.is_done(StepName.REGISTER_PLUGIN):
+        return
+    missing = [a for a in ("plugin.yaml", "entry.py") if not (_live_plugins_dir() / a).is_file()]
+    if not missing:
+        return
+    report.issues.append(
+        Issue(
+            code="PLUGIN_ASSETS_MISSING",
+            severity=Severity.WARN,
+            message=(
+                f"{_live_plugins_dir()} is missing {', '.join(missing)} — "
+                f"the hermes-agent plugin loader will not find the v2 plugin"
+            ),
+            fix_hint=(
+                "run `hermes-memory install --step 7` (or "
+                "`hermes-memory doctor --heal` to drop the files automatically)"
+            ),
+        )
+    )
+
+
+def _heal_plugin_assets(home: Path) -> bool:
+    """Drop the v2 plugin files into ~/.hermes/plugins/<PLUGIN_NAME>/.
+    Mirrors what RegisterPluginStep._drop_plugin_assets does. Returns
+    True on success."""
+    import shutil
+    from importlib import resources
+
+    pkg_root = Path(str(resources.files("hermes_memory")))
+    plugins_dir = home / "plugins" / PLUGIN_NAME
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    for asset in ("plugin.yaml", "entry.py"):
+        src = pkg_root / asset
+        dst = plugins_dir / asset
+        if not src.is_file():
+            return False
+        shutil.copy2(src, dst)
+    return True
+
+
 def run_doctor(
     home: Path | None = None,
     *,
@@ -298,6 +363,7 @@ def run_doctor(
 
     _check_env_present(home, report)
     _check_dsn_format(home, report)
+    _check_plugin_assets(home, report)
 
     if heal:
         for issue in list(report.issues):
@@ -307,6 +373,14 @@ def run_doctor(
                     issue.severity = Severity.OK
                     issue.message = "rewrote DSN in ~/.hermes/.env using the password file"
                     issue.code = "DSN_HEALED"
+                    issue.fix_hint = ""
+            elif issue.code == "PLUGIN_ASSETS_MISSING":
+                if _heal_plugin_assets(home):
+                    issue.severity = Severity.OK
+                    issue.message = (
+                        f"dropped plugin.yaml + entry.py into {home / 'plugins' / PLUGIN_NAME}"
+                    )
+                    issue.code = "PLUGIN_ASSETS_HEALED"
                     issue.fix_hint = ""
 
     if pg_check:

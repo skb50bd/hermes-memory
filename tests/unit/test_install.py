@@ -21,6 +21,8 @@ Public surface tested here:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from hermes_memory.install.state import STEP_ORDER, StateError, StepName, WizardState
@@ -277,3 +279,91 @@ def test_register_plugin_sets_memory_provider(tmp_path, monkeypatch):
     assert "postgres" in text
     # Old MCP block is gone
     assert "/old/csharp/binary" not in text
+
+
+def test_register_plugin_drops_filesystem_marker(tmp_path, monkeypatch):
+    """The register step MUST drop the plugin's plugin.yaml + entry.py into
+    ~/.hermes/plugins/hermes-postgres-memory/. Without those, the
+    hermes-agent plugin loader can't actually find the plugin — it
+    just sees an entry in config.yaml pointing at a missing dir.
+    This is the "non-invasive plug-in" promise from PLAN-V2 §1.2."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("memory:\n  provider: ''\nplugins:\n  enabled: []\n")
+
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PLUGINS_DIR", plugins_dir)
+    # Point the loader's package-data lookup at our dev tree
+    pkg_root = Path(__file__).resolve().parents[2] / "src" / "hermes_memory"
+    monkeypatch.setattr("hermes_memory.install.steps.PACKAGE_DATA_ROOT", pkg_root)
+
+    step = RegisterPluginStep(state_dir=tmp_path)
+    result = step.run()
+    assert result.success is True, result.message
+    # Filesystem evidence: the loader needs plugin.yaml + entry.py
+    assert (plugins_dir / "plugin.yaml").is_file(), "plugin.yaml not dropped"
+    assert (plugins_dir / "entry.py").is_file(), "entry.py not dropped"
+    # plugin.yaml must declare the same name the loader looks up
+    import yaml
+
+    manifest = yaml.safe_load((plugins_dir / "plugin.yaml").read_text())
+    assert manifest["name"] == PLUGIN_NAME
+    # entry.py must import the v2 register() function
+    entry_src = (plugins_dir / "entry.py").read_text()
+    assert "register" in entry_src
+    assert "hermes_memory" in entry_src
+
+
+def test_register_plugin_idempotent_on_rerun(tmp_path, monkeypatch):
+    """Re-running install must NOT fail when the plugin dir already
+    exists from a prior run. Should overwrite the marker files in
+    place and report success."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "stale-marker.txt").write_text("old run")
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("memory:\n  provider: ''\nplugins:\n  enabled: []\n")
+    pkg_root = Path(__file__).resolve().parents[2] / "src" / "hermes_memory"
+
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PLUGINS_DIR", plugins_dir)
+    monkeypatch.setattr("hermes_memory.install.steps.PACKAGE_DATA_ROOT", pkg_root)
+
+    step = RegisterPluginStep(state_dir=tmp_path)
+    result = step.run()
+    assert result.success is True, result.message
+    # The fresh files are there
+    assert (plugins_dir / "plugin.yaml").is_file()
+    assert (plugins_dir / "entry.py").is_file()
+    # Stale markers from prior runs are left alone (we don't nuke user data)
+
+
+def test_status_reports_missing_plugin_dir(tmp_path, monkeypatch):
+    """status command must detect when config.yaml lists the plugin but
+    the plugin directory is missing — currently it falsely reports
+    "all steps OK" because it only reads the cached state JSON.
+    A real install needs the filesystem marker to be present."""
+    from hermes_memory.install.paths import PLUGIN_NAME
+    from hermes_memory.install.steps import RegisterPluginStep
+
+    plugins_dir = tmp_path / "plugins" / PLUGIN_NAME  # not created
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("memory:\n  provider: ''\nplugins:\n  enabled: []\n")
+    pkg_root = Path(__file__).resolve().parents[2] / "src" / "hermes_memory"
+
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_CONFIG_PATH", config_path)
+    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PLUGINS_DIR", plugins_dir)
+    monkeypatch.setattr("hermes_memory.install.steps.PACKAGE_DATA_ROOT", pkg_root)
+
+    step = RegisterPluginStep(state_dir=tmp_path)
+    step.run()
+    # After the step runs, the marker MUST exist
+    assert (plugins_dir / "plugin.yaml").exists()
+    assert (plugins_dir / "entry.py").exists()
