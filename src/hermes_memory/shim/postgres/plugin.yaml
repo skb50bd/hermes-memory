@@ -1,0 +1,15 @@
+name: postgres
+version: 2.0.0
+description: >-
+  PostgreSQL-backed memory provider (v2 hermes-postgres-memory plugin).
+  Provides chunked long-term memory (issue #5 fix), FTS + vector hybrid
+  search, and per-profile storage. Overrides the built-in `memory` tool
+  entirely (issue #8 fix).
+author: Shakib Haris
+license: MIT
+pip_dependencies:
+  - psycopg[binary]>=3.1
+  - httpx>=0.27
+requires_env:
+  - HERMES_PG_CONN_STR
+is_memory_provider: true

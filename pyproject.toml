@@ -36,7 +36,13 @@ hermes-postgres-memory = "hermes_memory:register"
 where = ["src"]
 
 [tool.setuptools.package-data]
-hermes_memory = ["plugin.yaml", "migrations/*.sql", "docker/postgres/*"]
+hermes_memory = [
+    "plugin.yaml",
+    "entry.py",
+    "migrations/*.sql",
+    "docker/postgres/*",
+    "shim/postgres/*",
+]
 
 [tool.ruff]
 line-length = 100

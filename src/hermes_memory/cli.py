@@ -26,6 +26,7 @@ from hermes_memory.install.state import (
 )
 from hermes_memory.install.steps import (
     DsnStep,
+    MigrateStep,
     PreflightStep,
     RegisterPluginStep,
 )
@@ -533,7 +534,13 @@ def _run_install(args: argparse.Namespace) -> int:
     state = WizardState(HERMES_STATE_PATH)
     steps_impl = {
         StepName.PREFLIGHT: lambda: PreflightStep(state_dir=HERMES_STATE_PATH.parent).run(),
+        # PREFLIGHT, DSN, MIGRATE, REGISTER_PLUGIN are the 4 Python-
+        # implemented steps. The other 5 (POSTGRES, EXTENSIONS, TEMPLATE,
+        # PROFILE_DB, EMBEDDER) are bash-delegated and handled by
+        # _run_bash_delegated_step. Each entry in STEP_ORDER MUST appear
+        # in one of the two paths — see tests/unit/test_cli_install_wiring.py.
         StepName.DSN: lambda: DsnStep(state_dir=HERMES_STATE_PATH.parent).run(),
+        StepName.MIGRATE: lambda: MigrateStep(state_dir=HERMES_STATE_PATH.parent).run(),
         StepName.REGISTER_PLUGIN: lambda: RegisterPluginStep(
             state_dir=HERMES_STATE_PATH.parent
         ).run(),

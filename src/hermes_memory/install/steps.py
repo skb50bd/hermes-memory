@@ -37,6 +37,7 @@ from hermes_memory.install.paths import (
     HERMES_CONFIG_PATH,
     HERMES_ENV_PATH,
     HERMES_HOME,
+    HERMES_MEMORY_SHIM_DIR,
     HERMES_PG_CONN_STR_DEFAULT,
     HERMES_PLUGINS_DIR,
     HERMES_STATE_PATH,
@@ -60,6 +61,7 @@ __all__ = [
     "HERMES_CONFIG_PATH",
     "HERMES_STATE_PATH",
     "HERMES_PLUGINS_DIR",
+    "HERMES_MEMORY_SHIM_DIR",
     "HERMES_PG_CONN_STR_DEFAULT",
     "PLUGIN_NAME",
     "PreflightStep",
@@ -336,9 +338,19 @@ class RegisterPluginStep(_BaseStep):
         # plug-in" promise.
         self._drop_plugin_assets()
 
+        # 5) Drop the MemoryProvider shim at ~/.hermes/plugins/postgres/
+        # so that `hermes memory status` reports the v2 plugin as installed.
+        # Without this, the discovery scanner at
+        # plugins/memory/__init__.py::_iter_provider_dirs() doesn't see
+        # the v2 plugin as a memory provider (it scans $HERMES_HOME/plugins/
+        # directly and applies the _is_memory_provider_dir heuristic to
+        # each child, NOT $HERMES_HOME/plugins/memory/<name>/ as the
+        # misleading comment in the discovery source suggests).
+        self._drop_memory_shim()
+
         return self._result(
             True,
-            f"registered {PLUGIN_NAME} in config.yaml; dropped plugin assets at {HERMES_PLUGINS_DIR}",
+            f"registered {PLUGIN_NAME} in config.yaml; dropped plugin assets at {HERMES_PLUGINS_DIR}; dropped memory shim at {HERMES_MEMORY_SHIM_DIR}",
         )
 
     def _drop_plugin_assets(self) -> None:
@@ -360,5 +372,39 @@ class RegisterPluginStep(_BaseStep):
                 raise FileNotFoundError(
                     f"v2 install asset missing: {src} "
                     f"(expected to be shipped inside the hermes_memory package)"
+                )
+            shutil.copy2(src, dst)
+
+    def _drop_memory_shim(self) -> None:
+        """Copy the MemoryProvider shim from the v2 package to
+        $HERMES_HOME/plugins/postgres/. Idempotent.
+
+        Why this is a separate method from _drop_plugin_assets:
+        - The shim lives at $HERMES_HOME/plugins/postgres/ (not
+          $HERMES_HOME/plugins/hermes-postgres-memory/) so that the
+          discovery scanner at plugins/memory/__init__.py
+          treats it as a sibling memory-provider directory
+        - Discovery key fact: the scanner iterates $HERMES_HOME/plugins/
+          directly and applies _is_memory_provider_dir to each child;
+          the directory name is what gets matched against
+          config.yaml's `memory.provider` (which is "postgres")
+        - The shim is a no-op register(ctx) function plus a minimal
+          _PostgresMemoryProvider class — see shim/postgres/__init__.py
+        - The shim satisfies the discovery heuristic (contains the
+          literal substring 'MemoryProvider' in the first 8KB) and the
+          loading contract (defines a register(collector) function that
+          calls collector.register_memory_provider(instance))
+        """
+        HERMES_MEMORY_SHIM_DIR.mkdir(parents=True, exist_ok=True)
+        shim_src = PACKAGE_DATA_ROOT / "shim" / "postgres"
+        for asset in ("__init__.py", "plugin.yaml"):
+            src = shim_src / asset
+            dst = HERMES_MEMORY_SHIM_DIR / asset
+            if not src.is_file():
+                # Don't silently skip — surface the bug loudly.
+                raise FileNotFoundError(
+                    f"v2 memory shim asset missing: {src} "
+                    f"(expected to be shipped inside the hermes_memory package "
+                    f"at shim/postgres/{asset})"
                 )
             shutil.copy2(src, dst)
