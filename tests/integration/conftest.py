@@ -126,39 +126,49 @@ def _drop_test_db(admin_dsn: str, name: str) -> None:
 
 @pytest.fixture(scope="session")
 def pg_dsn() -> Generator[str, None, None]:
-    """Session-scoped test DSN, backed by a per-session ephemeral DB."""
+    """Session-scoped test DSN, backed by a per-session ephemeral DB.
+
+    Strategy: create an empty DB and apply the v2 migrations
+    (0001-0011). We do NOT clone from `hermes_template` because the
+    prod template's schema has drifted from the v2 code's expected
+    schema (e.g. `hermes_observability.logs` was renamed to
+    `hermes_observability.events`, `hermes_sessions.sessions` got
+    a `name` column the v2 code doesn't expect). The migrations
+    in `migrations/*.sql` are the source of truth for the v2 schema.
+    """
     with _session_lock:
-        # CI bootstrap: create hermes_template if missing.
         admin_dsn = PROD_DSN.rsplit("/", 1)[0] + "/postgres"
-        if os.environ.get("HERMES_MEMORY_CI_BOOTSTRAP") == "1":
-            from hermes_memory.tests.integration.ci_bootstrap import bootstrap_if_needed
-
-            bootstrap_if_needed(admin_dsn, TEMPLATE_DB)
-        else:
-            # Local dev: assume hermes_template already exists. If not, we
-            # try the bootstrap anyway so dev ergonomics match CI.
-            try:
-                with psycopg.connect(admin_dsn, autocommit=True) as c, c.cursor() as cur:
-                    cur.execute(  # pyright: ignore[call-overload]
-                        "SELECT 1 FROM pg_database WHERE datname = %s", (TEMPLATE_DB,)
-                    )
-                    if cur.fetchone() is None:
-                        from hermes_memory.tests.integration.ci_bootstrap import (
-                            bootstrap_if_needed,
-                        )
-
-                        bootstrap_if_needed(admin_dsn, TEMPLATE_DB)
-            except Exception:
-                pass
-        dbname = _create_test_db(PROD_DSN, TEMPLATE_DB)
+        # Always create an empty DB. Skip the template-clone path
+        # entirely; the v2 schema is self-contained in migrations/.
+        dbname = _create_empty_db(admin_dsn)
     test_dsn = PROD_DSN.rsplit("/", 1)[0] + f"/{dbname}"
-    # Apply v2 migrations that aren't yet in the prod template.
-    # (0001-0009 are baked into hermes_template; 0010/0011 are v2 additions.)
-    # When the prod template catches up, these can be removed.
-    for name in ("0010_memory_chunks.sql", "0011_kanban_event_actor.sql"):
-        apply_one_migration(test_dsn, MIGRATIONS / name)
+    # Install the extensions the v2 migrations reference. The
+    # hermes-postgres:latest image ships them pre-installed in the
+    # cluster's `template1`, so a fresh DB created via
+    # `CREATE DATABASE` inherits them. The `IF NOT EXISTS` makes
+    # this a no-op on the prod image and a hard requirement on a
+    # bare pgvector base.
+    with psycopg.connect(test_dsn, autocommit=True) as c, c.cursor() as cur:
+        for ext in ("vector", "ltree", "pg_trgm"):
+            cur.execute(  # pyright: ignore[call-overload]
+                f'CREATE EXTENSION IF NOT EXISTS "{ext}";'
+            )
+    # Apply all v2 migrations in order. Each is idempotent (uses
+    # CREATE TABLE IF NOT EXISTS) so re-running is safe.
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        apply_one_migration(test_dsn, path)
     yield test_dsn
     _drop_test_db(PROD_DSN, dbname)
+
+
+def _create_empty_db(admin_dsn: str) -> str:
+    """Create an empty DB, return its name."""
+    name = f"hermes_pytest_{_random_suffix()}"
+    with psycopg.connect(admin_dsn, autocommit=True) as c, c.cursor() as cur:
+        cur.execute(  # pyright: ignore[call-overload]
+            sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name))
+        )
+    return name
 
 
 @pytest.fixture
