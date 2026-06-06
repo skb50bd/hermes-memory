@@ -110,8 +110,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install ruff
-        run: pip install "ruff>=0.6"
+      - name: Install ruff + PyYAML
+        run: pip install "ruff>=0.6" "PyYAML>=6.0"
       - name: Run ruff
         run: ruff check src/ tests/
       - name: Check formatting
@@ -176,16 +176,24 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        # Use the upstream pgvector base image for integration tests
-        # (matches PG major in docker/postgres/Dockerfile). Migrations
-        # are applied by the conftest from `migrations/*.sql`, so we
-        # don't need the full hermes-postgres image here — that one
-        # exists for production users, not for CI. Building it for
-        # every PR was burning 30+ min and hitting the
-        # `:dev` tag chicken-and-egg (the build job produces
-        # `:dev-${{ github.sha }}` but the service container is
-        # resolved before the build job runs).
-        image: pgvector/pgvector:pg18
+        # Use the production `hermes-postgres:latest` image. It has
+        # hermes_template pre-built with all 8 schemas + extensions
+        # (pgvector, timescaledb, age, pg_cron). Pulled from ghcr.io;
+        # the GHA cache layer speeds up subsequent runs to ~5s.
+        #
+        # Why not `pgvector/pgvector:pg18`? The PG backends need
+        # many tables (hermes_kanban.tenants, hermes_sessions.compression_locks,
+        # hermes_wiki.document_chunks, etc.) that aren't in the bare
+        # pgvector base. We'd have to bundle a 53KB schema dump as
+        # a test fixture, which drifts from prod on every schema
+        # change. The real image is the source of truth.
+        #
+        # Why not `ghcr.io/.../hermes-postgres:dev` (the
+        # build-image job's output)? The build job runs after the
+        # integration job's service container is resolved — a
+        # chicken-and-egg we hit in PR #9. `:latest` is updated by
+        # every main-branch push, so it always exists.
+        image: ghcr.io/skb50bd/hermes-memory/hermes-postgres:latest
         env:
           POSTGRES_PASSWORD: testpass
           POSTGRES_USER: hermes
@@ -199,7 +207,6 @@ jobs:
           --health-retries 10
     env:
       HERMES_PG_CONN_STR: postgresql://hermes:testpass@127.0.0.1:10432/hermes_test
-      HERMES_MEMORY_CI_BOOTSTRAP: '1'
       HERMES_EMBED_PROVIDER: ollama_local
       HERMES_EMBED_BASE_URL: http://127.0.0.1:11434/v1
     steps:
