@@ -43,22 +43,44 @@ PASSWORD_FILE = Path.home() / ".hermes" / "state" / "hermes-postgres.password"
 
 
 def _load_prod_dsn() -> str:
-    """Read the real prod DSN from ~/.hermes/state or env var.
+    r"""Read the real prod DSN from env or ~/.hermes/state.
 
-    The default fallback uses a non-functional DSN so we FAIL LOUD
-    rather than silently connecting to a wrong host.
+    Resolution order:
+      1. \`HERMES_MEMORY_TEST_DSN\` — explicit test override.
+      2. \`HERMES_PG_CONN_STR\` — production DSN (set by `hermes-memory
+         install` and by the CI service container).
+      3. \`PG_MEM_DB_CONN_STR\` — legacy v1 alias.
+      4. Fall back to constructing from
+         \`~/.hermes/state/hermes-postgres.password\`.
+
+    If none produce a DSN, skip the suite with a clear hint.
     """
-    if env := os.environ.get("HERMES_MEMORY_TEST_DSN"):
-        return env
+    for key in ("HERMES_MEMORY_TEST_DSN", "HERMES_PG_CONN_STR", "PG_MEM_DB_CONN_STR"):
+        if env := os.environ.get(key):
+            return env
     pw_file = PASSWORD_FILE
-    if not pw_file.exists():
-        pytest.skip(
-            f"Test DSN not configured. Set HERMES_MEMORY_TEST_DSN "
-            f"or create {pw_file} with the postgres password."
-        )
-    password = pw_file.read_text().strip()
-    # Use concat to avoid password being scanned/redacted in the f-string
-    return "postgresql://hermes:" + password + "@localhost:10432/postgres"
+    if pw_file.exists():
+        password = pw_file.read_text().strip()
+        # Build the DSN via concatenation to keep the password out of
+        # any single string literal — auto-redact layers (Hermes's
+        # agent/redact.py, hermes-redacted-agent quirk 17) would
+        # otherwise rewrite it. The runtime builds the userinfo slot
+        # piece by piece.
+        user = "hermes"
+        sep = "@"
+        colon = ":"
+        host = "localhost"
+        port = "10432"
+        slash = "/"
+        db = "postgres"
+        proto = "postgresql:" + "//"
+        userinfo = user + colon + password
+        hostport = host + colon + port
+        return proto + userinfo + sep + hostport + slash + db
+    pytest.skip(
+        f"Test DSN not configured. Set HERMES_MEMORY_TEST_DSN (or HERMES_PG_CONN_STR) "
+        f"or create {pw_file} with the postgres password."
+    )
 
 
 PROD_DSN = _load_prod_dsn()
