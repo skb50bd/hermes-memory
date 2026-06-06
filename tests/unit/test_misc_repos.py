@@ -90,14 +90,13 @@ class FakeSkillsRepo(SkillsRepo):
         key = f"{name}|{version}"
         if key in self._skills:
             return False
-        self._skills[key] = Skill(
-            name, version, description, owner, tuple(tags)
-        )
+        self._skills[key] = Skill(name, version, description, owner, tuple(tags))
         return True
 
     def _search(self, query, *, top_k):
         return [
-            s for s in self._skills.values()
+            s
+            for s in self._skills.values()
             if query.lower() in s.name.lower() or query.lower() in s.description.lower()
         ][:top_k]
 

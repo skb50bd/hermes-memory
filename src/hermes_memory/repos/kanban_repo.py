@@ -35,8 +35,15 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 TaskStatus = Literal[
-    "ready", "running", "blocked", "done",
-    "crashed", "timed_out", "failed", "archived", "cancelled",
+    "ready",
+    "running",
+    "blocked",
+    "done",
+    "crashed",
+    "timed_out",
+    "failed",
+    "archived",
+    "cancelled",
 ]
 
 
@@ -119,8 +126,16 @@ class KanbanRepo:
             raise ValueError("priority must be >= 0")
         task_id = self._new_task_id()
         self._insert_task(
-            task_id, tenant_slug, title, body, "ready",
-            priority, assignee, parent_id, list(tags or []), skills_json,
+            task_id,
+            tenant_slug,
+            title,
+            body,
+            "ready",
+            priority,
+            assignee,
+            parent_id,
+            list(tags or []),
+            skills_json,
         )
         return task_id
 
@@ -134,16 +149,12 @@ class KanbanRepo:
     ) -> list[Task]:
         if limit <= 0 or limit > 1000:
             raise ValueError("limit must be 1..1000")
-        return self._fetch_tasks(
-            tenant_slug, status=status, assignee=assignee, limit=limit
-        )
+        return self._fetch_tasks(tenant_slug, status=status, assignee=assignee, limit=limit)
 
     def get(self, task_id: str) -> Task | None:
         return self._fetch_task(task_id)
 
-    def claim(
-        self, assignee: str, *, max_runtime_seconds: int = 0
-    ) -> Task | None:
+    def claim(self, assignee: str, *, max_runtime_seconds: int = 0) -> Task | None:
         if not assignee:
             raise ValueError("assignee must be non-empty")
         return self._claim_next(assignee, max_runtime_seconds)
@@ -153,16 +164,12 @@ class KanbanRepo:
             raise ValueError("task_id must look like 't_<suffix>'")
         return self._heartbeat(task_id)
 
-    def complete(
-        self, task_id: str, summary: str, *, result: str | None = None
-    ) -> bool:
+    def complete(self, task_id: str, summary: str, *, result: str | None = None) -> bool:
         if not summary:
             raise ValueError("summary must be non-empty")
         return self._complete_task(task_id, summary, result)
 
-    def fail(
-        self, task_id: str, error: str, *, status: str = "failed"
-    ) -> bool:
+    def fail(self, task_id: str, error: str, *, status: str = "failed") -> bool:
         if status not in ("failed", "blocked", "cancelled"):
             raise ValueError(f"invalid fail status: {status}")
         return self._fail_task(task_id, error, status)
@@ -195,9 +202,7 @@ class KanbanRepo:
         thread_id: str | None = None,
         user_id: str | None = None,
     ) -> bool:
-        return self._insert_subscription(
-            task_id, platform, chat_id, thread_id, user_id
-        )
+        return self._insert_subscription(task_id, platform, chat_id, thread_id, user_id)
 
     def unsubscribe(
         self, task_id: str, platform: str, chat_id: str, *, thread_id: str | None = None
@@ -223,8 +228,17 @@ class KanbanRepo:
         raise NotImplementedError
 
     def _insert_task(
-        self, task_id, tenant_slug, title, body, status, priority,
-        assignee, parent_id, tags, skills_json,
+        self,
+        task_id,
+        tenant_slug,
+        title,
+        body,
+        status,
+        priority,
+        assignee,
+        parent_id,
+        tags,
+        skills_json,
     ) -> None:
         raise NotImplementedError
 

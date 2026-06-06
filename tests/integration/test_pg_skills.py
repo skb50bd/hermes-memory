@@ -8,6 +8,7 @@ import pytest
 @pytest.fixture
 def skills_repo(pg_conn):
     from hermes_memory.pg_repos import PgSkillsRepo
+
     return PgSkillsRepo(pg_conn)
 
 

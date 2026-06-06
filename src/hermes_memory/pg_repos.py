@@ -51,6 +51,7 @@ def _json(obj) -> str:
         return "{}"
     return json.dumps(obj)
 
+
 _POOLS: dict[str, ConnectionPool] = {}
 _POOLS_LOCK = threading.Lock()
 
@@ -91,9 +92,7 @@ class PgMemoryRepo(MemoryRepo):
     def _embed_query(self, query: str) -> list[float]:
         return self._embedders.embed(query)
 
-    def _insert_memory(
-        self, content, *, tags, category, source, embedding_dim
-    ) -> int:
+    def _insert_memory(self, content, *, tags, category, source, embedding_dim) -> int:
         with _conn(self._dsn) as c, c.cursor() as cur:
             # Dedup check
             cur.execute(
@@ -134,9 +133,7 @@ class PgMemoryRepo(MemoryRepo):
                 )
             return mid
 
-    def _search(
-        self, query_embedding, query_text, *, top_k, hybrid_text_weight
-    ) -> list[Memory]:
+    def _search(self, query_embedding, query_text, *, top_k, hybrid_text_weight) -> list[Memory]:
         # Hybrid: FTS + vector, dedup by memory_id
         with _conn(self._dsn) as c:
             with c.cursor(row_factory=dict_row) as cur:
@@ -182,9 +179,13 @@ class PgMemoryRepo(MemoryRepo):
                     if fts is not None:
                         combined[mid] = combined.get(mid, 0) + hybrid_text_weight * fts["score"]
                     if vec is not None:
-                        combined[mid] = combined.get(mid, 0) + (1 - hybrid_text_weight) * vec["score"]
+                        combined[mid] = (
+                            combined.get(mid, 0) + (1 - hybrid_text_weight) * vec["score"]
+                        )
                     if mid in chunk_hits:
-                        combined[mid] = combined.get(mid, 0) + (1 - hybrid_text_weight) * chunk_hits[mid] * 0.5
+                        combined[mid] = (
+                            combined.get(mid, 0) + (1 - hybrid_text_weight) * chunk_hits[mid] * 0.5
+                        )
                 # Hydrate top K
                 top = sorted(combined.items(), key=lambda x: -x[1])[:top_k]
                 if not top:
@@ -201,15 +202,18 @@ class PgMemoryRepo(MemoryRepo):
                     r = by_id.get(mid)
                     if r is None:
                         continue
-                    out.append(Memory(
-                        id=r["id"], content=r["content"],
-                        tags=tuple(r["tags"] or ()),
-                        category=r["category"],
-                        source=r["source"],
-                        embedding_dim=self.default_dim,
-                        deleted=r["deleted"],
-                        created_at=str(r["created_at"]) if r["created_at"] else None,
-                    ))
+                    out.append(
+                        Memory(
+                            id=r["id"],
+                            content=r["content"],
+                            tags=tuple(r["tags"] or ()),
+                            category=r["category"],
+                            source=r["source"],
+                            embedding_dim=self.default_dim,
+                            deleted=r["deleted"],
+                            created_at=str(r["created_at"]) if r["created_at"] else None,
+                        )
+                    )
                 return out
 
     def _forget(self, memory_id) -> bool:
@@ -260,9 +264,7 @@ class PgWikiRepo(WikiRepo):
         with _conn(dsn) as c, c.cursor() as cur:
             cur.execute("SELECT 1")
 
-    def _insert_document(
-        self, slug, title, body_md, *, category, tags, metadata
-    ) -> int:
+    def _insert_document(self, slug, title, body_md, *, category, tags, metadata) -> int:
         with _conn(self._dsn) as c, c.cursor() as cur:
             cur.execute(
                 """
@@ -277,15 +279,13 @@ class PgWikiRepo(WikiRepo):
                       updated_at = now()
                 RETURNING id
                 """,
-                (slug, title, body_md, category,
-                 _json(metadata)),
+                (slug, title, body_md, category, _json(metadata)),
             )
             doc_id = cur.fetchone()[0]
             # Tags (best-effort — duplicate names reused via ON CONFLICT)
             for tag in tags or []:
                 cur.execute(
-                    "INSERT INTO hermes_wiki.tags(name) VALUES (%s) "
-                    "ON CONFLICT (name) DO NOTHING",
+                    "INSERT INTO hermes_wiki.tags(name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
                     (tag,),
                 )
                 cur.execute(
@@ -350,9 +350,13 @@ class PgWikiRepo(WikiRepo):
             )
             return [
                 Document(
-                    id=r["id"], slug=r["slug"], title=r["title"],
-                    body_md=r["body_md"], category=r["category"],
-                    metadata=r["metadata"] or {}, tags=(),
+                    id=r["id"],
+                    slug=r["slug"],
+                    title=r["title"],
+                    body_md=r["body_md"],
+                    category=r["category"],
+                    metadata=r["metadata"] or {},
+                    tags=(),
                 )
                 for r in cur.fetchall()
             ]
@@ -401,9 +405,13 @@ class PgWikiRepo(WikiRepo):
             )
             return [
                 Document(
-                    id=r["id"], slug=r["slug"], title=r["title"],
-                    body_md=r["body_md"], category=r["category"],
-                    metadata=r["metadata"] or {}, tags=(),
+                    id=r["id"],
+                    slug=r["slug"],
+                    title=r["title"],
+                    body_md=r["body_md"],
+                    category=r["category"],
+                    metadata=r["metadata"] or {},
+                    tags=(),
                 )
                 for r in cur.fetchall()
             ]
@@ -423,9 +431,13 @@ class PgWikiRepo(WikiRepo):
             )
             return [
                 Document(
-                    id=r["id"], slug=r["slug"], title=r["title"],
-                    body_md=r["body_md"], category=r["category"],
-                    metadata=r["metadata"] or {}, tags=(),
+                    id=r["id"],
+                    slug=r["slug"],
+                    title=r["title"],
+                    body_md=r["body_md"],
+                    category=r["category"],
+                    metadata=r["metadata"] or {},
+                    tags=(),
                 )
                 for r in cur.fetchall()
             ]
@@ -463,6 +475,7 @@ class PgJournalRepo(JournalRepo):
 
     def _search(self, query, *, top_k, session_id, role):
         from hermes_memory.repos.journal_repo import Message
+
         clauses: list[str] = [
             "SELECT m.id, m.session_id, m.role, m.content, m.tool_calls, ",
             "ts_rank_cd(m.content_tsv, plainto_tsquery('english', %s)) AS score ",
@@ -521,6 +534,7 @@ class PgSkillsRepo(SkillsRepo):
 
     def _search(self, query, *, top_k) -> list:
         from hermes_memory.repos.skills_repo import Skill
+
         with _conn(self._dsn) as c, c.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -605,9 +619,7 @@ class PgSkillsRepo(SkillsRepo):
                 src_name = id_to_name.get(sid)
                 if src_name is None:
                     continue
-                out[src_name] = [
-                    id_to_name[t] for t in targets if t in id_to_name
-                ]
+                out[src_name] = [id_to_name[t] for t in targets if t in id_to_name]
             return out
 
 
@@ -630,6 +642,7 @@ class PgMetricsRepo(MetricsRepo):
 
     def _query(self, profile, name, *, from_ts, to_ts, bucket):
         from hermes_memory.repos.metrics_repo import MetricPoint
+
         # Postgres date_trunc wants a unit name (minute, hour, day...), not
         # the human "1 minute" form. Map common bucket strings.
         unit = _bucket_to_pg_unit(bucket)
@@ -711,6 +724,7 @@ class PgKanbanRepo(KanbanRepo):
 
     def _fetch_tenants(self):
         from hermes_memory.repos.kanban_repo import Tenant
+
         with _conn(self._dsn) as c, c.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id, slug, name, description, icon, color "
@@ -719,7 +733,9 @@ class PgKanbanRepo(KanbanRepo):
             )
             return [
                 Tenant(
-                    id=r["id"], slug=r["slug"], name=r["name"],
+                    id=r["id"],
+                    slug=r["slug"],
+                    name=r["name"],
                     description=r["description"] or "",
                     icon=r["icon"] or "",
                     color=r["color"] or "",
@@ -729,8 +745,17 @@ class PgKanbanRepo(KanbanRepo):
 
     # ── tasks ──────────────────────────────────────────────────────────
     def _insert_task(
-        self, task_id, tenant_slug, title, body, status, priority,
-        assignee, parent_id, tags, skills_json,
+        self,
+        task_id,
+        tenant_slug,
+        title,
+        body,
+        status,
+        priority,
+        assignee,
+        parent_id,
+        tags,
+        skills_json,
     ) -> None:
         with _conn(self._dsn) as c, c.cursor() as cur:
             # Tenant → tenant_id
@@ -750,8 +775,14 @@ class PgKanbanRepo(KanbanRepo):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
                 (
-                    task_id, tenant_id, title, body, status, priority,
-                    assignee, _json(skills_json or []),
+                    task_id,
+                    tenant_id,
+                    title,
+                    body,
+                    status,
+                    priority,
+                    assignee,
+                    _json(skills_json or []),
                 ),
             )
             # Parent link, if any
@@ -771,6 +802,7 @@ class PgKanbanRepo(KanbanRepo):
 
     def _fetch_tasks(self, tenant_slug, *, status, assignee, limit):
         from hermes_memory.repos.kanban_repo import Task
+
         clauses = [
             "SELECT t.id, t.title, t.body, t.status, t.priority, t.assignee, "
             "       t.created_at, t.started_at, t.completed_at, t.skills, "
@@ -779,7 +811,7 @@ class PgKanbanRepo(KanbanRepo):
             "              WHERE l.child_id = t.id) AS has_parent ",
             "FROM hermes_kanban.tasks t "
             "JOIN hermes_kanban.tenants ten ON ten.id = t.tenant_id "
-            "WHERE ten.slug = %s "
+            "WHERE ten.slug = %s ",
         ]
         params: list = [tenant_slug]
         if status is not None:
@@ -795,9 +827,12 @@ class PgKanbanRepo(KanbanRepo):
             cur.execute(sql, params)  # type: ignore[arg-type]
             return [
                 Task(
-                    id=r["id"], tenant_slug=r["tenant_slug"],
-                    title=r["title"], body=r["body"] or "",
-                    status=r["status"], priority=r["priority"],
+                    id=r["id"],
+                    tenant_slug=r["tenant_slug"],
+                    title=r["title"],
+                    body=r["body"] or "",
+                    status=r["status"],
+                    priority=r["priority"],
                     assignee=r["assignee"],
                     parent_id="(has parent)" if r["has_parent"] else None,
                     tags=(),
@@ -810,6 +845,7 @@ class PgKanbanRepo(KanbanRepo):
 
     def _fetch_task(self, task_id):
         from hermes_memory.repos.kanban_repo import Task
+
         with _conn(self._dsn) as c, c.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -828,9 +864,12 @@ class PgKanbanRepo(KanbanRepo):
             if r is None:
                 return None
             return Task(
-                id=r["id"], tenant_slug=r["tenant_slug"],
-                title=r["title"], body=r["body"] or "",
-                status=r["status"], priority=r["priority"],
+                id=r["id"],
+                tenant_slug=r["tenant_slug"],
+                title=r["title"],
+                body=r["body"] or "",
+                status=r["status"],
+                priority=r["priority"],
                 assignee=r["assignee"],
                 parent_id=r["parent_id"],
                 tags=(),
@@ -842,6 +881,7 @@ class PgKanbanRepo(KanbanRepo):
     # ── claim (SKIP LOCKED) ────────────────────────────────────────────
     def _claim_next(self, assignee, max_runtime_seconds):
         from hermes_memory.repos.kanban_repo import Task
+
         # CTE: pick one ready task with FOR UPDATE SKIP LOCKED, then mark
         # it running. The CTE pattern is the standard
         # claim-from-queue idiom in PG.
@@ -886,9 +926,12 @@ class PgKanbanRepo(KanbanRepo):
                 (r["id"], assignee, max_runtime_seconds or None),
             )
             return Task(
-                id=r["id"], tenant_slug=r["tenant_slug"] or "",
-                title=r["title"], body=r["body"] or "",
-                status=r["status"], priority=r["priority"],
+                id=r["id"],
+                tenant_slug=r["tenant_slug"] or "",
+                title=r["title"],
+                body=r["body"] or "",
+                status=r["status"],
+                priority=r["priority"],
                 assignee=r["assignee"],
                 parent_id=None,
                 tags=(),
@@ -989,6 +1032,7 @@ class PgKanbanRepo(KanbanRepo):
 
     def _fetch_history(self, task_id, limit):
         from hermes_memory.repos.kanban_repo import Event
+
         with _conn(self._dsn) as c, c.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id, task_id, kind, actor, payload, created_at "
@@ -999,8 +1043,10 @@ class PgKanbanRepo(KanbanRepo):
             )
             return [
                 Event(
-                    id=r["id"], task_id=r["task_id"],
-                    kind=r["kind"], actor=r["actor"] or "system",
+                    id=r["id"],
+                    task_id=r["task_id"],
+                    kind=r["kind"],
+                    actor=r["actor"] or "system",
                     payload=r["payload"] or {},
                     created_at=str(r["created_at"]) if r["created_at"] else "",
                 )
@@ -1019,6 +1065,7 @@ class PgKanbanRepo(KanbanRepo):
 
     def _fetch_children(self, parent_id):
         from hermes_memory.repos.kanban_repo import Task
+
         with _conn(self._dsn) as c, c.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -1034,11 +1081,16 @@ class PgKanbanRepo(KanbanRepo):
             )
             return [
                 Task(
-                    id=r["id"], tenant_slug=r["tenant_slug"],
-                    title=r["title"], body=r["body"] or "",
-                    status=r["status"], priority=r["priority"],
-                    assignee=r["assignee"], parent_id=parent_id,
-                    tags=(), skills_json=r["skills"],
+                    id=r["id"],
+                    tenant_slug=r["tenant_slug"],
+                    title=r["title"],
+                    body=r["body"] or "",
+                    status=r["status"],
+                    priority=r["priority"],
+                    assignee=r["assignee"],
+                    parent_id=parent_id,
+                    tags=(),
+                    skills_json=r["skills"],
                     created_at=str(r["created_at"]) if r["created_at"] else None,
                 )
                 for r in cur.fetchall()
@@ -1046,6 +1098,7 @@ class PgKanbanRepo(KanbanRepo):
 
     def _fetch_parents(self, child_id):
         from hermes_memory.repos.kanban_repo import Task
+
         with _conn(self._dsn) as c, c.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -1061,11 +1114,16 @@ class PgKanbanRepo(KanbanRepo):
             )
             return [
                 Task(
-                    id=r["id"], tenant_slug=r["tenant_slug"],
-                    title=r["title"], body=r["body"] or "",
-                    status=r["status"], priority=r["priority"],
-                    assignee=r["assignee"], parent_id=None,
-                    tags=(), skills_json=r["skills"],
+                    id=r["id"],
+                    tenant_slug=r["tenant_slug"],
+                    title=r["title"],
+                    body=r["body"] or "",
+                    status=r["status"],
+                    priority=r["priority"],
+                    assignee=r["assignee"],
+                    parent_id=None,
+                    tags=(),
+                    skills_json=r["skills"],
                     created_at=str(r["created_at"]) if r["created_at"] else None,
                 )
                 for r in cur.fetchall()
@@ -1100,6 +1158,7 @@ class PgKanbanRepo(KanbanRepo):
     # ── search ─────────────────────────────────────────────────────────
     def _search(self, query, *, tenant_slug, limit):
         from hermes_memory.repos.kanban_repo import Task
+
         clauses = [
             "SELECT t.id, t.title, t.body, t.status, t.priority, t.assignee, "
             "       t.created_at, t.started_at, t.completed_at, t.skills, "
@@ -1107,7 +1166,7 @@ class PgKanbanRepo(KanbanRepo):
             "       ts_rank_cd(t.body_tsv, plainto_tsquery('english', %s)) AS score ",
             "FROM hermes_kanban.tasks t "
             "JOIN hermes_kanban.tenants ten ON ten.id = t.tenant_id "
-            "WHERE t.body_tsv @@ plainto_tsquery('english', %s) "
+            "WHERE t.body_tsv @@ plainto_tsquery('english', %s) ",
         ]
         params: list = [query, query]
         if tenant_slug is not None:
@@ -1120,12 +1179,16 @@ class PgKanbanRepo(KanbanRepo):
             cur.execute(sql, params)  # type: ignore[arg-type]
             return [
                 Task(
-                    id=r["id"], tenant_slug=r["tenant_slug"],
-                    title=r["title"], body=r["body"] or "",
-                    status=r["status"], priority=r["priority"],
+                    id=r["id"],
+                    tenant_slug=r["tenant_slug"],
+                    title=r["title"],
+                    body=r["body"] or "",
+                    status=r["status"],
+                    priority=r["priority"],
                     assignee=r["assignee"],
                     parent_id=None,
-                    tags=(), skills_json=r["skills"],
+                    tags=(),
+                    skills_json=r["skills"],
                     created_at=str(r["created_at"]) if r["created_at"] else None,
                 )
                 for r in cur.fetchall()
@@ -1168,8 +1231,10 @@ class PgObservabilityRepo(ObservabilityRepo):
                 VALUES (now(), %s, %s, %s, %s, %s, %s, %s::jsonb)
                 """,
                 (
-                    call.profile, call.model,
-                    call.prompt_tokens, call.completion_tokens,
+                    call.profile,
+                    call.model,
+                    call.prompt_tokens,
+                    call.completion_tokens,
                     call.prompt_tokens + call.completion_tokens,
                     call.duration_ms,
                     _json({"status": call.status}),
@@ -1186,8 +1251,11 @@ class PgObservabilityRepo(ObservabilityRepo):
                 VALUES (now(), %s, %s, %s, %s, %s, %s::jsonb)
                 """,
                 (
-                    call.profile, call.tool, call.duration_ms,
-                    call.status == "ok", call.error,
+                    call.profile,
+                    call.tool,
+                    call.duration_ms,
+                    call.status == "ok",
+                    call.error,
                     _json({"status": call.status}),
                 ),
             )
@@ -1223,9 +1291,8 @@ class PgSessionsRepo(SessionsRepo):
         # (high bits) so two repos don't accidentally clash if the
         # counters reset.
         import hashlib
-        h = int.from_bytes(
-            hashlib.sha256(text_sid.encode()).digest()[:4], "big", signed=False
-        )
+
+        h = int.from_bytes(hashlib.sha256(text_sid.encode()).digest()[:4], "big", signed=False)
         full = (h << 32) | int_id
         self._sid_map[full] = text_sid
         return full
@@ -1235,6 +1302,7 @@ class PgSessionsRepo(SessionsRepo):
 
     def _insert_session(self, profile, metadata) -> int:
         import secrets
+
         text_sid = "s_" + secrets.token_urlsafe(16)
         with _conn(self._dsn) as c, c.cursor() as cur:
             cur.execute(
@@ -1263,6 +1331,7 @@ class PgSessionsRepo(SessionsRepo):
 
     def _fetch_messages(self, session_id, limit, since):
         from hermes_memory.repos.sessions_repo import SessionMessage
+
         text_sid = self._int_to_sid(session_id)
         clauses = [
             "SELECT id, session_id, role, content, tool_calls, timestamp "
@@ -1294,10 +1363,7 @@ class PgSessionsRepo(SessionsRepo):
         with _conn(self._dsn) as c, c.cursor() as cur:
             # Two-step:
             # 1) Delete any expired locks
-            cur.execute(
-                "DELETE FROM hermes_sessions.compression_locks "
-                "WHERE expires_at < now()"
-            )
+            cur.execute("DELETE FROM hermes_sessions.compression_locks WHERE expires_at < now()")
             # 2) Try to insert a new lock; the PK is session_id so
             #    duplicates fail.
             cur.execute(

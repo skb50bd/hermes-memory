@@ -34,6 +34,7 @@ class StateError(Exception):
 
 class StepName(str, Enum):
     """The 8 wizard steps in execution order."""
+
     PREFLIGHT = "preflight"
     POSTGRES = "postgres"
     EXTENSIONS = "extensions"

@@ -83,9 +83,11 @@ def test_extensions_step_with_schemas_applied_says_skipped(capsys, tmp_path, mon
 
     fake_state = tmp_path / "state.json"
     monkeypatch.setattr("hermes_memory.cli.HERMES_STATE_PATH", fake_state)
-    with patch("hermes_memory.cli._pg_reachable", return_value=True), \
-         patch("hermes_memory.cli._hermes_template_exists", return_value=True), \
-         patch("hermes_memory.cli._hermes_template_has_all_schemas", return_value=True):
+    with (
+        patch("hermes_memory.cli._pg_reachable", return_value=True),
+        patch("hermes_memory.cli._hermes_template_exists", return_value=True),
+        patch("hermes_memory.cli._hermes_template_has_all_schemas", return_value=True),
+    ):
         rc = _run_install(argparse.Namespace(step=2, yes=True))
     out = capsys.readouterr().out
     assert rc == 0
@@ -103,8 +105,10 @@ def test_template_step_when_db_missing_says_run_bootstrap(capsys, tmp_path, monk
 
     fake_state = tmp_path / "state.json"
     monkeypatch.setattr("hermes_memory.cli.HERMES_STATE_PATH", fake_state)
-    with patch("hermes_memory.cli._pg_reachable", return_value=True), \
-         patch("hermes_memory.cli._hermes_template_exists", return_value=False):
+    with (
+        patch("hermes_memory.cli._pg_reachable", return_value=True),
+        patch("hermes_memory.cli._hermes_template_exists", return_value=False),
+    ):
         rc = _run_install(argparse.Namespace(step=3, yes=True))
     out = capsys.readouterr().out
     assert rc == 1, f"expected failure, got rc={rc} out={out!r}"

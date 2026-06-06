@@ -19,6 +19,7 @@ from hermes_memory.install.doctor import DoctorReport, Severity, run_doctor
 
 # -- helpers --
 
+
 def _write(env: Path, line: str) -> None:
     env.parent.mkdir(parents=True, exist_ok=True)
     env.write_text(line + "\n")
@@ -69,8 +70,7 @@ def test_doctor_detects_redacted_dsn(tmp_path: Path, monkeypatch: pytest.MonkeyP
     # No password file → FAIL
     report = run_doctor(home=tmp_path, pg_check=False, embedder_check=False)
     assert any(
-        i.code in ("DSN_REDACTED_NO_PWD_FILE", "DSN_REDACTED_HEALABLE")
-        for i in report.issues
+        i.code in ("DSN_REDACTED_NO_PWD_FILE", "DSN_REDACTED_HEALABLE") for i in report.issues
     ), f"expected redacted-DSN issue, got: {report.issues}"
 
 
@@ -107,9 +107,7 @@ def test_doctor_reports_missing_password_file(
     assert fail_issues, f"expected FAIL severity issue, got: {report.issues}"
 
 
-def test_doctor_detects_missing_env_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_doctor_detects_missing_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No ~/.hermes/.env at all: WARN severity (install never ran)."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 

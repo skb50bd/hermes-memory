@@ -122,9 +122,7 @@ def test_resolve_dsn_prefers_explicit_env(
     assert dsn == explicit
 
 
-def test_resolve_dsn_returns_empty_when_nothing_available(
-    tmp_path: Path, clean_env: None
-) -> None:
+def test_resolve_dsn_returns_empty_when_nothing_available(tmp_path: Path, clean_env: None) -> None:
     """No env, no .env, no password file returns empty string."""
     with patch("hermes_memory.cli.HERMES_HOME", tmp_path):
         dsn = _resolve_hermes_pg_dsn()
@@ -132,9 +130,7 @@ def test_resolve_dsn_returns_empty_when_nothing_available(
     assert dsn == ""
 
 
-def test_heal_uses_newest_matching_password_file(
-    tmp_path: Path, clean_env: None
-) -> None:
+def test_heal_uses_newest_matching_password_file(tmp_path: Path, clean_env: None) -> None:
     """If multiple state/*.password files exist, pick the most recently modified."""
     import os as _os
 
@@ -159,9 +155,7 @@ def test_heal_uses_newest_matching_password_file(
     assert "OLDVALUE" not in dsn
 
 
-def test_heal_preserves_special_characters_in_password(
-    tmp_path: Path, clean_env: None
-) -> None:
+def test_heal_preserves_special_characters_in_password(tmp_path: Path, clean_env: None) -> None:
     """Passwords with @, /, :, # are URL-encoded in the healed DSN."""
     import urllib.parse
 
@@ -184,9 +178,7 @@ def test_heal_preserves_special_characters_in_password(
     assert "hermes:p@s" not in dsn
 
 
-def test_resolve_dsn_falls_back_to_legacy_pg_mem_db(
-    tmp_path: Path, clean_env: None
-) -> None:
+def test_resolve_dsn_falls_back_to_legacy_pg_mem_db(tmp_path: Path, clean_env: None) -> None:
     """v1 Python plugin used PG_MEM_DB_CONN_STR; v2 accepts it as alias."""
     env = tmp_path / ".env"
     pwd = tmp_path / "state" / "hermes-postgres.password"

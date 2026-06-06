@@ -82,8 +82,14 @@ def test_step_names_count():
 
 def test_step_order_is_8_named():
     expected_names = {
-        "preflight", "postgres", "extensions", "template",
-        "profile_db", "dsn", "embedder", "register_plugin",
+        "preflight",
+        "postgres",
+        "extensions",
+        "template",
+        "profile_db",
+        "dsn",
+        "embedder",
+        "register_plugin",
     }
     actual = {s.value for s in STEP_ORDER}
     assert actual == expected_names
@@ -121,6 +127,7 @@ def test_wizard_skips_done_steps(tmp_path):
 def test_wizard_records_steps_after_run(tmp_path):
     s = WizardState(tmp_path / "state.json")
     ran = []
+
     def runner(step):
         ran.append(step)
         return StepResult(step, "ran", "ok")
@@ -219,8 +226,10 @@ def test_dsn_step_writes_env(tmp_path, monkeypatch):
 
     env_path = tmp_path / ".env"
     monkeypatch.setattr("hermes_memory.install.steps.HERMES_ENV_PATH", env_path)
-    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PG_CONN_STR_DEFAULT",
-                        "postgresql://hermes:test@127.0.0.1:10432/hermes_default")
+    monkeypatch.setattr(
+        "hermes_memory.install.steps.HERMES_PG_CONN_STR_DEFAULT",
+        "postgresql://hermes:test@127.0.0.1:10432/hermes_default",
+    )
     step = DsnStep(state_dir=tmp_path)
     result = step.run()
     assert result.success is True
@@ -233,8 +242,10 @@ def test_dsn_step_idempotent(tmp_path, monkeypatch):
 
     env_path = tmp_path / ".env"
     monkeypatch.setattr("hermes_memory.install.steps.HERMES_ENV_PATH", env_path)
-    monkeypatch.setattr("hermes_memory.install.steps.HERMES_PG_CONN_STR_DEFAULT",
-                        "postgresql://hermes:test@127.0.0.1:10432/hermes_default")
+    monkeypatch.setattr(
+        "hermes_memory.install.steps.HERMES_PG_CONN_STR_DEFAULT",
+        "postgresql://hermes:test@127.0.0.1:10432/hermes_default",
+    )
     step = DsnStep(state_dir=tmp_path)
     step.run()
     step.run()

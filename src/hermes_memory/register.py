@@ -91,6 +91,7 @@ def register(ctx) -> None:
 
     # 3) Hooks
     if hasattr(ctx, "register_hook"):
+
         def _on_session_end(**_):
             try:
                 obs = repos.get("observability")
@@ -98,6 +99,7 @@ def register(ctx) -> None:
                     obs.flush()
             except Exception as e:  # noqa: BLE001
                 logger.debug("hermes-memory: on_session_end flush failed: %s", e)
+
         ctx.register_hook("on_session_end", _on_session_end)
 
         def _pre_tool_call(tool_name: str, **kwargs):
@@ -105,6 +107,7 @@ def register(ctx) -> None:
             if tool_name in ("system_prompt_refresh", "memory") and memory_repo is not None:
                 return {"memory_block": build_memory_block(memory_repo)}
             return None
+
         ctx.register_hook("pre_tool_call", _pre_tool_call)
 
     logger.info(

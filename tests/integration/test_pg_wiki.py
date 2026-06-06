@@ -8,6 +8,7 @@ import pytest
 @pytest.fixture
 def wiki_repo(pg_conn):
     from hermes_memory.pg_repos import PgWikiRepo
+
     return PgWikiRepo(pg_conn)
 
 

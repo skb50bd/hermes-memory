@@ -35,8 +35,13 @@ class FakeRepo(MemoryRepo):
         mid = self.next_id
         self.next_id += 1
         self.memories[mid] = Memory(
-            id=mid, content=content, tags=tuple(tags), category=category,
-            source=source, embedding_dim=embedding_dim, deleted=False,
+            id=mid,
+            content=content,
+            tags=tuple(tags),
+            category=category,
+            source=source,
+            embedding_dim=embedding_dim,
+            deleted=False,
         )
         return mid
 
@@ -206,11 +211,30 @@ class FakeKanban(KanbanRepo):
     def _fetch_tenants(self):
         return [Tenant(t, s, s, "", "", "") for s, t in self.tenants.items()]
 
-    def _insert_task(self, task_id, tenant_slug, title, body, status, priority,
-                     assignee, parent_id, tags, skills_json):
+    def _insert_task(
+        self,
+        task_id,
+        tenant_slug,
+        title,
+        body,
+        status,
+        priority,
+        assignee,
+        parent_id,
+        tags,
+        skills_json,
+    ):
         self.tasks[task_id] = Task(
-            task_id, tenant_slug, title, body, status, priority, assignee,
-            parent_id, tuple(tags), skills_json
+            task_id,
+            tenant_slug,
+            title,
+            body,
+            status,
+            priority,
+            assignee,
+            parent_id,
+            tuple(tags),
+            skills_json,
         )
 
     def _fetch_tasks(self, tenant_slug, *, status, assignee, limit):

@@ -30,17 +30,33 @@ class FakeKanbanRepo(KanbanRepo):
 
     # tasks
     def _insert_task(
-        self, task_id, tenant_slug, title, body, status, priority,
-        assignee, parent_id, tags, skills_json,
+        self,
+        task_id,
+        tenant_slug,
+        title,
+        body,
+        status,
+        priority,
+        assignee,
+        parent_id,
+        tags,
+        skills_json,
     ):
         self._tasks[task_id] = Task(
-            id=task_id, tenant_slug=tenant_slug, title=title, body=body,
-            status=status, priority=priority, assignee=assignee,
-            parent_id=parent_id, tags=tuple(tags), skills_json=skills_json,
+            id=task_id,
+            tenant_slug=tenant_slug,
+            title=title,
+            body=body,
+            status=status,
+            priority=priority,
+            assignee=assignee,
+            parent_id=parent_id,
+            tags=tuple(tags),
+            skills_json=skills_json,
         )
-        self._events.append(Event(
-            self._next_eid, task_id, "created", assignee or "system", {}, "now"
-        ))
+        self._events.append(
+            Event(self._next_eid, task_id, "created", assignee or "system", {}, "now")
+        )
         self._next_eid += 1
 
     def _fetch_tasks(self, tenant_slug, *, status, assignee, limit):
@@ -64,9 +80,7 @@ class FakeKanbanRepo(KanbanRepo):
             if t.status == "ready":
                 t.status = "running"
                 t.assignee = assignee
-                self._events.append(Event(
-                    self._next_eid, t.id, "claimed", assignee, {}, "now"
-                ))
+                self._events.append(Event(self._next_eid, t.id, "claimed", assignee, {}, "now"))
                 self._next_eid += 1
                 return t
         return None
@@ -79,10 +93,16 @@ class FakeKanbanRepo(KanbanRepo):
         if not t or t.status not in ("ready", "running", "blocked"):
             return False
         t.status = "done"
-        self._events.append(Event(
-            self._next_eid, task_id, "completed", t.assignee or "system",
-            {"summary": summary, "result": result}, "now"
-        ))
+        self._events.append(
+            Event(
+                self._next_eid,
+                task_id,
+                "completed",
+                t.assignee or "system",
+                {"summary": summary, "result": result},
+                "now",
+            )
+        )
         self._next_eid += 1
         return True
 
@@ -91,18 +111,18 @@ class FakeKanbanRepo(KanbanRepo):
         if not t:
             return False
         t.status = status
-        self._events.append(Event(
-            self._next_eid, task_id, "failed", t.assignee or "system",
-            {"error": error}, "now"
-        ))
+        self._events.append(
+            Event(
+                self._next_eid, task_id, "failed", t.assignee or "system", {"error": error}, "now"
+            )
+        )
         self._next_eid += 1
         return True
 
     def _insert_comment(self, task_id, body, author):
-        self._events.append(Event(
-            self._next_eid, task_id, "comment", author or "system",
-            {"body": body}, "now"
-        ))
+        self._events.append(
+            Event(self._next_eid, task_id, "comment", author or "system", {"body": body}, "now")
+        )
         self._next_eid += 1
         return self._next_eid - 1
 

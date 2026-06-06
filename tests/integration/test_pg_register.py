@@ -13,8 +13,14 @@ def test_all_surfaces_construct_with_real_dsn(pg_conn, monkeypatch) -> None:
 
     repos = _try_build_repos()
     assert set(repos.keys()) == {
-        "memory", "wiki", "journal", "skills",
-        "metrics", "kanban", "observability", "sessions",
+        "memory",
+        "wiki",
+        "journal",
+        "skills",
+        "metrics",
+        "kanban",
+        "observability",
+        "sessions",
     }
 
 

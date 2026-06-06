@@ -55,9 +55,7 @@ class HttpEmbedder(Embedder):
         timeout: float = 30.0,
     ) -> None:
         if dim not in SUPPORTED_DIMS:
-            raise ValueError(
-                f"unsupported dim {dim}; choose one of {SUPPORTED_DIMS}"
-            )
+            raise ValueError(f"unsupported dim {dim}; choose one of {SUPPORTED_DIMS}")
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._dim = dim
@@ -94,9 +92,7 @@ class HttpEmbedder(Embedder):
         try:
             vec = data["data"][0]["embedding"]
         except (KeyError, IndexError, TypeError) as e:
-            raise EmbeddingError(
-                f"embedder response missing 'data[0].embedding': {e}"
-            ) from e
+            raise EmbeddingError(f"embedder response missing 'data[0].embedding': {e}") from e
         if len(vec) != self._dim:
             # The embedder returned a different dim than expected;
             # truncate or pad to keep the column constraint happy.
@@ -115,9 +111,7 @@ class EmbedderRegistry:
     def __init__(self, embedders: dict[int, Embedder]) -> None:
         self._embedders = embedders
         if DEFAULT_DIM not in embedders:
-            raise ValueError(
-                f"default dim {DEFAULT_DIM} must be in the registry"
-            )
+            raise ValueError(f"default dim {DEFAULT_DIM} must be in the registry")
 
     @property
     def default_dim(self) -> int:
@@ -127,9 +121,7 @@ class EmbedderRegistry:
     def from_env(cls) -> EmbedderRegistry:
         provider = os.environ.get("HERMES_EMBED_PROVIDER", "ollama_local").strip()
         if provider == "ollama_local":
-            base_url = os.environ.get(
-                "HERMES_EMBED_BASE_URL", "http://10.49.0.52:11434/v1"
-            )
+            base_url = os.environ.get("HERMES_EMBED_BASE_URL", "http://10.49.0.52:11434/v1")
             dim = int(os.environ.get("HERMES_EMBED_DIM", "1024"))
             # 768-dim uses nomic-embed-text-v2-moe, 1024 uses bge-m3
             model = os.environ.get(
@@ -137,13 +129,9 @@ class EmbedderRegistry:
                 "bge-m3" if dim == 1024 else "nomic-embed-text-v2-moe",
             )
         elif provider == "openai":
-            base_url = os.environ.get(
-                "HERMES_EMBED_BASE_URL", "https://api.openai.com/v1"
-            )
+            base_url = os.environ.get("HERMES_EMBED_BASE_URL", "https://api.openai.com/v1")
             dim = int(os.environ.get("HERMES_EMBED_DIM", "1536"))
-            model = os.environ.get(
-                "HERMES_EMBED_MODEL", "text-embedding-3-small"
-            )
+            model = os.environ.get("HERMES_EMBED_MODEL", "text-embedding-3-small")
         elif provider == "http":
             base_url = os.environ["HERMES_EMBED_BASE_URL"]
             dim = int(os.environ["HERMES_EMBED_DIM"])
@@ -154,9 +142,7 @@ class EmbedderRegistry:
                 f"(expected ollama_local, openai, or http)"
             )
         api_key = os.environ.get("HERMES_EMBED_API_KEY")
-        embedder = HttpEmbedder(
-            base_url=base_url, model=model, dim=dim, api_key=api_key
-        )
+        embedder = HttpEmbedder(base_url=base_url, model=model, dim=dim, api_key=api_key)
         return cls({dim: embedder})
 
     def embed(self, text: str, *, dim: int | None = None) -> list[float]:

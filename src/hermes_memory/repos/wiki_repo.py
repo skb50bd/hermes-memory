@@ -45,7 +45,9 @@ class WikiRepo:
         if not title:
             raise ValueError("title must be non-empty")
         return self._insert_document(
-            slug, title, body_md,
+            slug,
+            title,
+            body_md,
             category=category,
             tags=list(tags or []),
             metadata=metadata or {},
@@ -54,9 +56,7 @@ class WikiRepo:
     def read(self, slug: str) -> Document | None:
         return self._fetch_document(slug)
 
-    def link(
-        self, source_slug: str, target_slug: str, *, context: str | None = None
-    ) -> bool:
+    def link(self, source_slug: str, target_slug: str, *, context: str | None = None) -> bool:
         if source_slug == target_slug:
             return False
         return self._insert_link(source_slug, target_slug, context)
@@ -75,9 +75,7 @@ class WikiRepo:
         return self._search(query, top_k=top_k)
 
     # -- hooks
-    def _insert_document(
-        self, slug, title, body_md, *, category, tags, metadata
-    ) -> int:
+    def _insert_document(self, slug, title, body_md, *, category, tags, metadata) -> int:
         raise NotImplementedError
 
     def _fetch_document(self, slug) -> Document | None:

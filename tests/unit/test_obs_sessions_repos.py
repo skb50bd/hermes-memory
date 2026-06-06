@@ -161,6 +161,7 @@ def test_sessions_get_messages_since():
     since = datetime.utcnow() + timedelta(milliseconds=10)
     # Force a clear wall-clock gap so the second message's ts > since.
     import time
+
     time.sleep(0.05)
     s.append_message(sid, "user", "b")
     msgs = s.get_messages(sid, since=since)

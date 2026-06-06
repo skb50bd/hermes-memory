@@ -67,9 +67,7 @@ class ObservabilityRepo:
     ) -> int | None:
         if level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
             raise ValueError(f"invalid level: {level}")
-        return self._insert_log(
-            LogEvent(level, message, profile, fields or {}, "now")
-        )
+        return self._insert_log(LogEvent(level, message, profile, fields or {}, "now"))
 
     def record_llm_call(
         self,
@@ -98,9 +96,7 @@ class ObservabilityRepo:
     ) -> int:
         if status not in ("ok", "error"):
             raise ValueError(f"invalid status: {status}")
-        return self._insert_tool_call(
-            ToolCall(profile, tool, duration_ms, status, error)
-        )
+        return self._insert_tool_call(ToolCall(profile, tool, duration_ms, status, error))
 
     def flush(self) -> int:
         return self._flush()

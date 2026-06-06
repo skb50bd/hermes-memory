@@ -42,6 +42,18 @@ printf -v RST '\033[0m'
 
 cd "$(git rev-parse --show-toplevel)"
 
+# Always run `ruff format --check` over the whole project, not just
+# staged files. Formatting drift across unstaged files is a common
+# source of CI failures (the CI lint job runs `ruff format --check`
+# and a single unformatted file fails the whole job).
+if command -v ruff >/dev/null 2>&1; then
+    if ! ruff format --check src/ tests/ 2>&1; then
+        echo "${RED}pre-commit: ruff format --check failed${RST}"
+        echo "${YEL}Run: ruff format src/ tests/${RST}"
+        exit 1
+    fi
+fi
+
 # Find staged files (added/copied/modified/renamed, not deleted).
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 if [ -z "$STAGED" ]; then

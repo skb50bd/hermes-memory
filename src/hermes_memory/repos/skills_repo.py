@@ -38,9 +38,7 @@ class SkillsRepo:
             raise ValueError("name must be non-empty")
         if not version:
             raise ValueError("version must be non-empty")
-        return self._insert_skill(
-            name, version, description, owner, list(tags or [])
-        )
+        return self._insert_skill(name, version, description, owner, list(tags or []))
 
     def search(self, query: str, *, top_k: int = 20) -> list[Skill]:
         if not query.strip():

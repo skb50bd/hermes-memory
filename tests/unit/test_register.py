@@ -24,16 +24,18 @@ class FakeCtx:
         self.tools: dict[tuple[str, str], dict[str, Any]] = {}
         self.hooks: list[tuple[str, Any]] = []
 
-    def register_tool(
-        self, *, name, toolset, schema, handler, override=False, **kw
-    ):
+    def register_tool(self, *, name, toolset, schema, handler, override=False, **kw):
         # Idempotency: same name+toolset twice = second wins
         key = (name, toolset)
         if key in self.tools and not override:
             raise RuntimeError(f"duplicate tool {name} in {toolset}")
         self.tools[key] = {
-            "name": name, "toolset": toolset, "schema": schema,
-            "handler": handler, "override": override, **kw,
+            "name": name,
+            "toolset": toolset,
+            "schema": schema,
+            "handler": handler,
+            "override": override,
+            **kw,
         }
 
     def register_hook(self, name, fn):
@@ -113,6 +115,7 @@ def test_register_calls_handler_with_kwargs(ctx):
     # 'auto' provider takes the local path). Either way, the
     # response is a JSON object.
     import json
+
     out = handler(action="add", content="x")
     parsed = json.loads(out)
     assert isinstance(parsed, dict)
@@ -136,6 +139,7 @@ def _inject_fake_repos(monkeypatch=None) -> None:
         "sessions": object(),
     }
     import hermes_memory.register as reg_mod
+
     if monkeypatch is not None:
         monkeypatch.setattr(reg_mod, "_try_build_repos", lambda: fake)
     else:

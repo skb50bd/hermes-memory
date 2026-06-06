@@ -42,9 +42,7 @@ class MetricsRepo:
         to_ts: datetime | None = None,
         bucket: str = "1 minute",
     ) -> list[MetricPoint]:
-        return self._query(
-            profile, name, from_ts=from_ts, to_ts=to_ts, bucket=bucket
-        )
+        return self._query(profile, name, from_ts=from_ts, to_ts=to_ts, bucket=bucket)
 
     def _insert_event(self, profile, name, value, tags) -> int:
         raise NotImplementedError

@@ -50,9 +50,7 @@ class Chunk:
         if not self.text or not self.text.strip():
             raise ValueError(f"chunk {self.index} has empty text")
         if self.token_count <= 0:
-            raise ValueError(
-                f"chunk {self.index} has non-positive token_count={self.token_count}"
-            )
+            raise ValueError(f"chunk {self.index} has non-positive token_count={self.token_count}")
 
 
 def _approx_tokens(text: str) -> int:
@@ -101,8 +99,7 @@ def chunk_text(
         raise ValueError(f"overlap_tokens must be >= 0, got {overlap_tokens}")
     if overlap_tokens >= window_tokens:
         raise ValueError(
-            f"overlap_tokens ({overlap_tokens}) must be < "
-            f"window_tokens ({window_tokens})"
+            f"overlap_tokens ({overlap_tokens}) must be < window_tokens ({window_tokens})"
         )
 
     stripped = text.strip()

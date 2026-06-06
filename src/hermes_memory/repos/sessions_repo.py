@@ -33,9 +33,7 @@ class SessionMessage:
 
 
 class SessionsRepo:
-    def open_session(
-        self, profile: str, *, metadata: dict[str, Any] | None = None
-    ) -> int:
+    def open_session(self, profile: str, *, metadata: dict[str, Any] | None = None) -> int:
         if not profile:
             raise ValueError("profile must be non-empty")
         return self._insert_session(profile, metadata or {})

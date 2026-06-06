@@ -11,8 +11,6 @@ HERMES_CONFIG_PATH = HERMES_HOME / "config.yaml"
 HERMES_STATE_PATH = HERMES_HOME / "state" / "hermes-memory.json"
 HERMES_PLUGINS_DIR = HERMES_HOME / "plugins" / "hermes-postgres-memory"
 
-HERMES_PG_CONN_STR_DEFAULT = (
-    "postgresql://hermes:***@127.0.0.1:10432/hermes_default"
-)
+HERMES_PG_CONN_STR_DEFAULT = "postgresql://hermes:***@127.0.0.1:10432/hermes_default"
 
 PLUGIN_NAME = "hermes-postgres-memory"

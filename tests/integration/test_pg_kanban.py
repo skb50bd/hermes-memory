@@ -10,6 +10,7 @@ import pytest
 @pytest.fixture
 def kanban_repo(pg_conn):
     from hermes_memory.pg_repos import PgKanbanRepo
+
     return PgKanbanRepo(pg_conn)
 
 

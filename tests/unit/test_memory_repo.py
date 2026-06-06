@@ -48,9 +48,7 @@ class FakeMemoryRepo(MemoryRepo):
         self._default_dim = default_dim
 
     # -- helpers used by the test base class
-    def _insert_memory(
-        self, content, *, tags, category, source, embedding_dim
-    ) -> int:
+    def _insert_memory(self, content, *, tags, category, source, embedding_dim) -> int:
         from hermes_memory.embeddings.chunker import chunk_text
 
         # Dedup on (content, source)
@@ -89,9 +87,7 @@ class FakeMemoryRepo(MemoryRepo):
         # No-op for the fake; chunks are inserted in _insert_memory.
         pass
 
-    def _search(
-        self, query_embedding, query_text, *, top_k, hybrid_text_weight
-    ) -> list[Memory]:
+    def _search(self, query_embedding, query_text, *, top_k, hybrid_text_weight) -> list[Memory]:
         # Naive: score = 1 / (1 + |query_text - memory.content|)
         hits = []
         for m in self._memories.values():
@@ -114,8 +110,7 @@ class FakeMemoryRepo(MemoryRepo):
     def _status(self) -> dict:
         live = sum(1 for m in self._memories.values() if not m.deleted)
         chunk_count = sum(
-            len(c) for mid, c in self._chunks.items()
-            if not self._memories[mid].deleted
+            len(c) for mid, c in self._chunks.items() if not self._memories[mid].deleted
         )
         return {
             "total_memories": len(self._memories),
@@ -257,6 +252,7 @@ def test_routing_rule_message_quotes_the_rule():
     """The error message itself must contain the routing rule — that's
     how the agent learns the boundary (issue #5 acceptance criterion)."""
     from hermes_memory.repos.memory_repo import routing_rule_message
+
     msg = routing_rule_message(size_bytes=MEMORY_MAX_CHARS + 1, cap=MEMORY_MAX_CHARS)
     assert "MEMORY" in msg
     assert "WIKI" in msg

@@ -2,12 +2,20 @@
 
 Strategy
 --------
-The real `hermes-postgres` server (port 10432) already contains a
-`hermes_template` database with ALL 8 schemas applied. We don't need
-testcontainers — we just create a throwaway database per test session,
-clone it from `hermes_template`, and truncate between tests.
+Two paths, picked by env var:
 
-Each test:
+  HERMES_MEMORY_CI_BOOTSTRAP=1 (default in CI)
+    The target PG is a fresh `pgvector/pgvector:pg18` with no
+    `hermes_template`. We create the template with the minimum
+    schemas (no timescaledb hypertables, no age graphs) needed
+    by the 8 PG backends. Then per-test DB clones are cheap.
+
+  HERMES_MEMORY_CI_BOOTSTRAP unset (default in local dev)
+    The target PG is the real `hermes-postgres` (port 10432) with
+    the full `hermes_template` already populated by `hermes_init.sh`.
+    We just create a throwaway DB cloned from it.
+
+In both modes, each test:
   1. Starts a savepoint
   2. Truncates all hermes_* tables (CASCADE)
   3. Yields a DSN pointing to the per-session test DB
@@ -75,9 +83,11 @@ def _create_test_db(admin_dsn: str, template: str) -> str:
     """Create a fresh test DB cloned from `template`."""
     name = f"hermes_pytest_{_random_suffix()}"
     with psycopg.connect(admin_dsn, autocommit=True) as c, c.cursor() as cur:
-        cur.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
-            sql.Identifier(name), sql.Identifier(template)
-        ))
+        cur.execute(
+            sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(name), sql.Identifier(template)
+            )
+        )
     return name
 
 
@@ -89,15 +99,35 @@ def _drop_test_db(admin_dsn: str, name: str) -> None:
             "WHERE datname = %s AND pid <> pg_backend_pid()",
             (name,),
         )
-        cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(
-            sql.Identifier(name)
-        ))
+        cur.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
 
 
 @pytest.fixture(scope="session")
 def pg_dsn() -> Generator[str, None, None]:
     """Session-scoped test DSN, backed by a per-session ephemeral DB."""
     with _session_lock:
+        # CI bootstrap: create hermes_template if missing.
+        admin_dsn = PROD_DSN.rsplit("/", 1)[0] + "/postgres"
+        if os.environ.get("HERMES_MEMORY_CI_BOOTSTRAP") == "1":
+            from hermes_memory.tests.integration.ci_bootstrap import bootstrap_if_needed
+
+            bootstrap_if_needed(admin_dsn, TEMPLATE_DB)
+        else:
+            # Local dev: assume hermes_template already exists. If not, we
+            # try the bootstrap anyway so dev ergonomics match CI.
+            try:
+                with psycopg.connect(admin_dsn, autocommit=True) as c, c.cursor() as cur:
+                    cur.execute(  # pyright: ignore[call-overload]
+                        "SELECT 1 FROM pg_database WHERE datname = %s", (TEMPLATE_DB,)
+                    )
+                    if cur.fetchone() is None:
+                        from hermes_memory.tests.integration.ci_bootstrap import (
+                            bootstrap_if_needed,
+                        )
+
+                        bootstrap_if_needed(admin_dsn, TEMPLATE_DB)
+            except Exception:
+                pass
         dbname = _create_test_db(PROD_DSN, TEMPLATE_DB)
     test_dsn = PROD_DSN.rsplit("/", 1)[0] + f"/{dbname}"
     # Apply v2 migrations that aren't yet in the prod template.
@@ -137,4 +167,5 @@ def pg_conn(pg_dsn) -> Generator[str, None, None]:
 def memory_repo(pg_conn: str):
     """PgMemoryRepo wired to a truncated test DB."""
     from hermes_memory.pg_repos import PgMemoryRepo
+
     return PgMemoryRepo(pg_conn)

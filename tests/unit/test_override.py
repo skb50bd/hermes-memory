@@ -41,8 +41,13 @@ class FakeRepo(MemoryRepo):
         mid = self.next_id
         self.next_id += 1
         self.memories[mid] = Memory(
-            id=mid, content=content, tags=tuple(tags), category=category,
-            source=source, embedding_dim=embedding_dim, deleted=False,
+            id=mid,
+            content=content,
+            tags=tuple(tags),
+            category=category,
+            source=source,
+            embedding_dim=embedding_dim,
+            deleted=False,
         )
         return mid
 

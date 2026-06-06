@@ -8,6 +8,7 @@ import pytest
 @pytest.fixture
 def journal_repo(pg_conn):
     from hermes_memory.pg_repos import PgJournalRepo
+
     return PgJournalRepo(pg_conn)
 
 

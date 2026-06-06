@@ -36,8 +36,15 @@ def test_build_parser_has_subcommands():
     # Subcommand parsers exist (rough check — the test is that
     # the parser builds without error)
     expected = [
-        "install", "uninstall", "status", "doctor", "migrate",
-        "version", "export", "import", "rollback",
+        "install",
+        "uninstall",
+        "status",
+        "doctor",
+        "migrate",
+        "version",
+        "export",
+        "import",
+        "rollback",
     ]
     for cmd in expected:
         # Each subcommand must parse (without args where applicable)
@@ -49,7 +56,9 @@ def test_build_parser_has_subcommands():
                 if cmd == "export":
                     parser.parse_args([cmd, "--surface", "memory", "--format", "json"])
                 else:
-                    parser.parse_args([cmd, "--surface", "memory", "--format", "json", "--in", "/tmp/x"])
+                    parser.parse_args(
+                        [cmd, "--surface", "memory", "--format", "json", "--in", "/tmp/x"]
+                    )
             elif cmd in ("install", "uninstall"):
                 parser.parse_args([cmd, "--yes"])
             else:

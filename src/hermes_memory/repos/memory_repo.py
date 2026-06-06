@@ -85,7 +85,7 @@ def routing_rule_message(*, size_bytes: int, cap: int) -> str:
         f"  • WIKI    — long-form, structured, multi-paragraph. Stored via\n"
         f"             wiki_create. Surface: explicit reads, cross-linked.\n"
         f"  • SESSION — never persist; use session_search.\n\n"
-        f"Did you mean: wiki_create with category=\"projects.<name>\"?"
+        f'Did you mean: wiki_create with category="projects.<name>"?'
     )
 
 
@@ -112,9 +112,7 @@ class MemoryRepo:
             raise ValueError("content must be a non-empty string")
         if len(content) > MEMORY_MAX_CHARS:
             raise RoutingRuleViolationError(
-                routing_rule_message(
-                    size_bytes=len(content), cap=MEMORY_MAX_CHARS
-                )
+                routing_rule_message(size_bytes=len(content), cap=MEMORY_MAX_CHARS)
             )
         return self._insert_memory(
             content,
@@ -167,9 +165,7 @@ class MemoryRepo:
     ) -> int:
         raise NotImplementedError
 
-    def _insert_chunks(
-        self, memory_id: int, chunks: list[Any], dim: int
-    ) -> None:
+    def _insert_chunks(self, memory_id: int, chunks: list[Any], dim: int) -> None:
         raise NotImplementedError
 
     def _search(

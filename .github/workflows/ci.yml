@@ -176,19 +176,30 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: ghcr.io/skb50bd/hermes-memory/hermes-postgres:dev
+        # Use the upstream pgvector base image for integration tests
+        # (matches PG major in docker/postgres/Dockerfile). Migrations
+        # are applied by the conftest from `migrations/*.sql`, so we
+        # don't need the full hermes-postgres image here — that one
+        # exists for production users, not for CI. Building it for
+        # every PR was burning 30+ min and hitting the
+        # `:dev` tag chicken-and-egg (the build job produces
+        # `:dev-${{ github.sha }}` but the service container is
+        # resolved before the build job runs).
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: testpass
           POSTGRES_USER: hermes
+          POSTGRES_DB: hermes_test
         ports:
           - 10432:5432
         options: >-
-          --health-cmd "pg_isready -U hermes"
+          --health-cmd "pg_isready -U hermes -d hermes_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
     env:
       HERMES_PG_CONN_STR: postgresql://hermes:testpass@127.0.0.1:10432/hermes_test
+      HERMES_MEMORY_CI_BOOTSTRAP: '1'
       HERMES_EMBED_PROVIDER: ollama_local
       HERMES_EMBED_BASE_URL: http://127.0.0.1:11434/v1
     steps:
@@ -234,7 +245,12 @@ jobs:
       - name: Build + push
         uses: docker/build-push-action@v6
         with:
-          context: docker/postgres
+          # Build context is the repo root (not docker/postgres/) so
+          # the Dockerfile's `COPY migrations` finds the files at
+          # the repo root. The Dockerfile path is still under
+          # docker/postgres/ — buildx resolves the file relative to
+          # the build context.
+          context: .
           file: docker/postgres/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: ${{ github.event_name != 'pull_request' }}

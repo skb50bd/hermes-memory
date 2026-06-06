@@ -194,9 +194,7 @@ def _check_dsn_format(home: Path, report: DoctorReport) -> None:
                             f"{key} has the redaction marker in the password slot and "
                             "no password file under ~/.hermes/state/ to recover from"
                         ),
-                        fix_hint=(
-                            "rotate the PG password, then re-run `hermes-memory install`"
-                        ),
+                        fix_hint=("rotate the PG password, then re-run `hermes-memory install`"),
                     )
                 )
             else:

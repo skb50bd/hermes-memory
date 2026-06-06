@@ -79,7 +79,7 @@ def pg_remember(
         return _tool_error(
             "no_repo",
             message="no MemoryRepo wired into this session "
-                    "(install the plugin via 'hermes-memory install')",
+            "(install the plugin via 'hermes-memory install')",
         )
     mid = repo.remember(content, tags=tags, category=category, source=source)
     if mid == 0:
@@ -109,9 +109,7 @@ def pg_forget(memory_id: int, *, repo: MemoryRepo | None = None) -> str:
         return _tool_error("no_repo", message="no MemoryRepo wired in")
     try:
         ok = repo.forget(memory_id)
-        return json.dumps(
-            {"status": "forgot" if ok else "not_found", "id": memory_id}
-        )
+        return json.dumps({"status": "forgot" if ok else "not_found", "id": memory_id})
     except MemoryNotFoundError as e:
         return _tool_error("not_found", message=str(e))
 
@@ -155,47 +153,69 @@ def memory_tool(
     # Routing decision
     if provider == PROVIDER_POSTGRES:
         return _route_postgres(
-            action, content=content, memory_id=memory_id, query=query,
-            top_k=top_k, tags=tags, category=category, source=source, repo=repo,
+            action,
+            content=content,
+            memory_id=memory_id,
+            query=query,
+            top_k=top_k,
+            tags=tags,
+            category=category,
+            source=source,
+            repo=repo,
         )
     if provider == PROVIDER_LOCAL or not provider:
         return _route_local(
-            action, content=content, memory_id=memory_id, query=query,
-            top_k=top_k, local_path=local_path or _read_local_store_path(),
+            action,
+            content=content,
+            memory_id=memory_id,
+            query=query,
+            top_k=top_k,
+            local_path=local_path or _read_local_store_path(),
         )
     if provider == PROVIDER_AUTO:
         # Try postgres; on no_repo, fall back to local
         out = _route_postgres(
-            action, content=content, memory_id=memory_id, query=query,
-            top_k=top_k, tags=tags, category=category, source=source, repo=repo,
+            action,
+            content=content,
+            memory_id=memory_id,
+            query=query,
+            top_k=top_k,
+            tags=tags,
+            category=category,
+            source=source,
+            repo=repo,
         )
         if '"no_repo"' in out:
             return _route_local(
-                action, content=content, memory_id=memory_id, query=query,
-                top_k=top_k, local_path=local_path or _read_local_store_path(),
+                action,
+                content=content,
+                memory_id=memory_id,
+                query=query,
+                top_k=top_k,
+                local_path=local_path or _read_local_store_path(),
             )
         return out
     return _tool_error("invalid_provider", message=f"unknown provider: {provider}")
 
 
-def _route_postgres(action, *, content, memory_id, query, top_k, tags, category, source, repo) -> str:
+def _route_postgres(
+    action, *, content, memory_id, query, top_k, tags, category, source, repo
+) -> str:
     if action == "add":
         if not content:
             return _tool_error("validation_error", message="add requires 'content'")
         try:
-            return pg_remember(
-                content, tags=tags, category=category, source=source, repo=repo
-            )
+            return pg_remember(content, tags=tags, category=category, source=source, repo=repo)
         except RoutingRuleViolationError as e:
             return _tool_error("routing_rule_violation", message=str(e))
     if action == "replace":
         if memory_id is None or not content:
-            return _tool_error("validation_error", message="replace requires 'memory_id' and 'content'")
+            return _tool_error(
+                "validation_error", message="replace requires 'memory_id' and 'content'"
+            )
         # Soft-delete old, then add new (idempotent at the dedup level)
         pg_forget(memory_id, repo=repo)
-        return pg_remember(
-            content, tags=tags, category=category, source=source, repo=repo
-        )
+        return pg_remember(content, tags=tags, category=category, source=source, repo=repo)
     if action == "remove":
         if memory_id is None:
             return _tool_error("validation_error", message="remove requires 'memory_id'")
@@ -227,10 +247,7 @@ def _route_local(action, *, content, memory_id, query, top_k, local_path) -> str
     if action == "search" and query:
         try:
             with open(local_path) as f:
-                lines = [
-                    line.strip() for line in f
-                    if query.lower() in line.lower()
-                ]
+                lines = [line.strip() for line in f if query.lower() in line.lower()]
             return json.dumps(
                 {"query": query, "count": len(lines[:top_k]), "results": lines[:top_k]},
                 indent=2,
@@ -249,7 +266,7 @@ def _route_local(action, *, content, memory_id, query, top_k, local_path) -> str
     return _tool_error(
         "not_implemented_in_local",
         message=f"action {action!r} not supported in local fallback; "
-                f"see https://github.com/skb50bd/hermes-memory for the full tool",
+        f"see https://github.com/skb50bd/hermes-memory for the full tool",
     )
 
 

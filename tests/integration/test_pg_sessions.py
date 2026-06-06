@@ -10,6 +10,7 @@ import pytest
 @pytest.fixture
 def sessions_repo(pg_conn):
     from hermes_memory.pg_repos import PgSessionsRepo
+
     return PgSessionsRepo(pg_conn)
 
 

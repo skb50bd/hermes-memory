@@ -39,6 +39,7 @@ def _repo_or_none(name: str):
             PgSkillsRepo,
             PgWikiRepo,
         )
+
         dsn = os.environ.get("HERMES_PG_CONN_STR")
         if not dsn:
             return None
@@ -191,12 +192,17 @@ def export_sessions_to_jsonl(out_dir: Path) -> int:
                         (sid,),
                     )
                     for role, content, tool_calls, ts in cur.fetchall():
-                        out.write(json.dumps({
-                            "role": role,
-                            "content": content,
-                            "tool_calls": tool_calls,
-                            "ts": str(ts),
-                        }) + "\n")
+                        out.write(
+                            json.dumps(
+                                {
+                                    "role": role,
+                                    "content": content,
+                                    "tool_calls": tool_calls,
+                                    "ts": str(ts),
+                                }
+                            )
+                            + "\n"
+                        )
                 n += 1
     return n
 
@@ -219,16 +225,23 @@ def export_metrics_to_jsonl(path: Path) -> int:
     with psycopg.connect(dsn) as c:
         with c.cursor() as cur:
             cur.execute(
-                "SELECT profile, name, value, tags, ts "
-                "FROM hermes_metrics.events ORDER BY ts"
+                "SELECT profile, name, value, tags, ts FROM hermes_metrics.events ORDER BY ts"
             )
             rows = cur.fetchall()
     with path.open("w") as f:
         for profile, name, value, tags, ts in rows:
-            f.write(json.dumps({
-                "profile": profile, "name": name, "value": value,
-                "tags": tags, "ts": str(ts),
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "profile": profile,
+                        "name": name,
+                        "value": value,
+                        "tags": tags,
+                        "ts": str(ts),
+                    }
+                )
+                + "\n"
+            )
     return len(rows)
 
 
@@ -255,10 +268,17 @@ def export_kanban_to_sqlite(out_dir: Path) -> int:
         tenant_dir = out_dir / "boards" / slug
         tenant_dir.mkdir(parents=True, exist_ok=True)
         # JSON manifest as a stand-in for SQLite (v2.1 fills this)
-        (tenant_dir / "kanban.json").write_text(json.dumps({
-            "tenant_id": tid, "name": name, "description": description,
-            "note": "v2.0 stub — full SQLite export in v2.1",
-        }, indent=2))
+        (tenant_dir / "kanban.json").write_text(
+            json.dumps(
+                {
+                    "tenant_id": tid,
+                    "name": name,
+                    "description": description,
+                    "note": "v2.0 stub — full SQLite export in v2.1",
+                },
+                indent=2,
+            )
+        )
         n += 1
     return n
 

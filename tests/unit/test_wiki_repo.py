@@ -19,8 +19,13 @@ class FakeWikiRepo(WikiRepo):
         did = self._next_id
         self._next_id += 1
         self._docs[slug] = Document(
-            id=did, slug=slug, title=title, body_md=body_md,
-            category=category, metadata=metadata, tags=tuple(tags),
+            id=did,
+            slug=slug,
+            title=title,
+            body_md=body_md,
+            category=category,
+            metadata=metadata,
+            tags=tuple(tags),
         )
         return did
 
@@ -57,9 +62,9 @@ class FakeWikiRepo(WikiRepo):
 
     def _search(self, query, *, top_k):
         hits = [
-            d for d in self._docs.values()
-            if query.lower() in d.title.lower()
-            or query.lower() in d.body_md.lower()
+            d
+            for d in self._docs.values()
+            if query.lower() in d.title.lower() or query.lower() in d.body_md.lower()
         ]
         return hits[:top_k]
 
@@ -151,7 +156,9 @@ def test_search_empty_query_returns_empty(repo):
 
 def test_create_with_tags_and_category(repo):
     repo.create(
-        "x", "X", "body",
+        "x",
+        "X",
+        "body",
         category="projects.sportsverse",
         tags=["postgres", "wiki"],
         metadata={"author": "shakib"},

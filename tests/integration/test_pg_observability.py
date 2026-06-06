@@ -8,6 +8,7 @@ import pytest
 @pytest.fixture
 def obs_repo(pg_conn):
     from hermes_memory.pg_repos import PgObservabilityRepo
+
     return PgObservabilityRepo(pg_conn)
 
 
@@ -24,22 +25,30 @@ def test_log_validates_level(obs_repo) -> None:
 
 def test_record_llm_call(obs_repo) -> None:
     obs_repo.record_llm_call(
-        profile="default", model="gpt-4",
-        prompt_tokens=100, completion_tokens=50, duration_ms=1200,
+        profile="default",
+        model="gpt-4",
+        prompt_tokens=100,
+        completion_tokens=50,
+        duration_ms=1200,
     )
 
 
 def test_record_tool_call(obs_repo) -> None:
     obs_repo.record_tool_call(
-        profile="default", tool="web_search",
-        duration_ms=300, status="ok",
+        profile="default",
+        tool="web_search",
+        duration_ms=300,
+        status="ok",
     )
 
 
 def test_record_tool_call_with_error(obs_repo) -> None:
     obs_repo.record_tool_call(
-        profile="default", tool="web_search",
-        duration_ms=300, status="error", error="timeout",
+        profile="default",
+        tool="web_search",
+        duration_ms=300,
+        status="error",
+        error="timeout",
     )
 
 

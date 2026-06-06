@@ -41,9 +41,16 @@ from hermes_memory.install.state import StepName, StepResult
 # continues to work.
 # ---------------------------------------------------------------------------
 __all__ = [
-    "HERMES_HOME", "HERMES_ENV_PATH", "HERMES_CONFIG_PATH", "HERMES_STATE_PATH",
-    "HERMES_PLUGINS_DIR", "HERMES_PG_CONN_STR_DEFAULT", "PLUGIN_NAME",
-    "PreflightStep", "DsnStep", "RegisterPluginStep",
+    "HERMES_HOME",
+    "HERMES_ENV_PATH",
+    "HERMES_CONFIG_PATH",
+    "HERMES_STATE_PATH",
+    "HERMES_PLUGINS_DIR",
+    "HERMES_PG_CONN_STR_DEFAULT",
+    "PLUGIN_NAME",
+    "PreflightStep",
+    "DsnStep",
+    "RegisterPluginStep",
 ]
 
 
@@ -79,6 +86,7 @@ class PreflightStep(_BaseStep):
 
     def _check_python(self) -> bool:
         import sys
+
         return sys.version_info >= self.REQUIRED_PYTHON
 
     def _check_docker(self) -> bool:
@@ -86,6 +94,7 @@ class PreflightStep(_BaseStep):
 
     def _check_port(self, port: int) -> bool:
         import socket
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
                 s.bind(("127.0.0.1", port))
@@ -100,6 +109,7 @@ class PreflightStep(_BaseStep):
         not a random TCP service).
         """
         import socket
+
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
                 # Postgres v3 startup packet: length(int32) + protocol(196608) + user/db

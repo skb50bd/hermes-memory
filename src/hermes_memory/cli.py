@@ -49,7 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     # uninstall
     p_uninstall = sub.add_parser("uninstall", help="Remove plugin + offer data export")
     p_uninstall.add_argument(
-        "--export", type=str, default="",
+        "--export",
+        type=str,
+        default="",
         help="Comma-separated surfaces to export before teardown: memory,kanban,wiki,sessions,metrics",
     )
     p_uninstall.add_argument("--yes", "-y", action="store_true")
@@ -83,11 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
     # export
     p_export = sub.add_parser("export", help="Export a surface to JSON/Markdown/SQLite")
     p_export.add_argument(
-        "--surface", required=True,
+        "--surface",
+        required=True,
         choices=["memory", "wiki", "kanban", "sessions", "metrics", "journal", "skills"],
     )
     p_export.add_argument(
-        "--format", required=True,
+        "--format",
+        required=True,
         choices=["json", "markdown", "sqlite"],
     )
     p_export.add_argument("--out", type=Path, default=None)
@@ -96,16 +100,19 @@ def build_parser() -> argparse.ArgumentParser:
     # import
     p_import = sub.add_parser("import", help="Restore from an export file")
     p_import.add_argument(
-        "--surface", required=True,
+        "--surface",
+        required=True,
         choices=["memory", "wiki", "kanban", "sessions", "metrics", "journal", "skills"],
     )
     p_import.add_argument(
-        "--format", required=True,
+        "--format",
+        required=True,
         choices=["json", "markdown", "sqlite"],
     )
     p_import.add_argument("--in", dest="in_path", type=Path, required=True)
     p_import.add_argument(
-        "--on-conflict", default="skip",
+        "--on-conflict",
+        default="skip",
         choices=["skip", "upsert", "error"],
     )
 
@@ -163,9 +170,9 @@ def _resolve_step(step_arg) -> StepName:
         if not 0 <= step_arg < len(STEP_ORDER):
             valid = ", ".join(f"{i}={s.value}" for i, s in enumerate(STEP_ORDER))
             import sys
+
             print(
-                f"hermes-memory install: --step {step_arg} out of range; "
-                f"valid: {valid}",
+                f"hermes-memory install: --step {step_arg} out of range; valid: {valid}",
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -176,13 +183,14 @@ def _resolve_step(step_arg) -> StepName:
                 return s
         # Legacy aliases
         from hermes_memory.install.state import LEGACY_NAME_MAP
+
         if step_arg in LEGACY_NAME_MAP:
             return StepName(LEGACY_NAME_MAP[step_arg])
         import sys
+
         valid = ", ".join(s.value for s in STEP_ORDER)
         print(
-            f"hermes-memory install: unknown step {step_arg!r}; "
-            f"valid: {valid}",
+            f"hermes-memory install: unknown step {step_arg!r}; valid: {valid}",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -249,9 +257,7 @@ def _heal_redacted_dsn(dsn: str, hermes_home: Path | None = None) -> str:
     from urllib.parse import quote
 
     safe = quote(real_password, safe="")
-    return dsn.replace(_REDACTED_PASSWORD, safe, 1).replace(
-        _REDACTED_PASSWORD, safe, 1
-    )
+    return dsn.replace(_REDACTED_PASSWORD, safe, 1).replace(_REDACTED_PASSWORD, safe, 1)
 
 
 def _resolve_hermes_pg_dsn(hermes_home: Path | None = None) -> str:
@@ -294,10 +300,7 @@ def _load_env_file(hermes_home: Path | None = None) -> None:
     except Exception:
         pass
     # v1 → v2 alias: PG_MEM_DB_CONN_STR is the old Python plugin key.
-    if (
-        "HERMES_PG_CONN_STR" not in os.environ
-        and "PG_MEM_DB_CONN_STR" in os.environ
-    ):
+    if "HERMES_PG_CONN_STR" not in os.environ and "PG_MEM_DB_CONN_STR" in os.environ:
         os.environ["HERMES_PG_CONN_STR"] = os.environ["PG_MEM_DB_CONN_STR"]
     # Heal redacted passwords in any DSN that just got loaded.
     for key in ("HERMES_PG_CONN_STR", "PG_MEM_DB_CONN_STR"):
@@ -321,6 +324,7 @@ def _pg_reachable(dsn: str | None = None) -> bool:
         # Fall back to the default port — same logic as PreflightStep.
         try:
             import socket
+
             with socket.create_connection(("127.0.0.1", 10432), timeout=1) as s:
                 s.sendall(b"\x00\x00\x00\x08\x04\xd2\x16\x2f")
                 s.settimeout(1)
@@ -330,6 +334,7 @@ def _pg_reachable(dsn: str | None = None) -> bool:
             return False
     try:
         import psycopg
+
         with psycopg.connect(dsn, connect_timeout=2) as c:
             c.execute("SELECT 1").fetchone()
         return True
@@ -346,6 +351,7 @@ def _hermes_template_exists(dsn: str | None = None) -> bool:
         return False
     try:
         import psycopg
+
         with psycopg.connect(dsn, connect_timeout=2) as c, c.cursor() as cur:
             cur.execute("SELECT 1 FROM pg_database WHERE datname = 'hermes_template'")
             return cur.fetchone() is not None
@@ -354,9 +360,14 @@ def _hermes_template_exists(dsn: str | None = None) -> bool:
 
 
 _REQUIRED_SCHEMAS = (
-    "agent_memory", "hermes_wiki", "hermes_journal",
-    "hermes_skills", "hermes_metrics", "hermes_kanban",
-    "hermes_observability", "hermes_sessions",
+    "agent_memory",
+    "hermes_wiki",
+    "hermes_journal",
+    "hermes_skills",
+    "hermes_metrics",
+    "hermes_kanban",
+    "hermes_observability",
+    "hermes_sessions",
 )
 
 
@@ -375,10 +386,10 @@ def _hermes_template_has_all_schemas(dsn: str | None = None) -> bool:
         return False
     try:
         import psycopg
+
         with psycopg.connect(admin_dsn, connect_timeout=2) as c, c.cursor() as cur:
             cur.execute(
-                "SELECT schema_name FROM information_schema.schemata "
-                "WHERE schema_name = ANY(%s)",
+                "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ANY(%s)",
                 (list(_REQUIRED_SCHEMAS),),
             )
             present = {r[0] for r in cur.fetchall()}
@@ -394,11 +405,10 @@ def _embedder_reachable() -> bool:
     setup, but we also accept localhost). Probes with the OpenAI-compatible
     /embeddings endpoint.
     """
-    url = os.environ.get(
-        "HERMES_EMBED_URL", "http://10.49.0.52:11434/v1/embeddings"
-    )
+    url = os.environ.get("HERMES_EMBED_URL", "http://10.49.0.52:11434/v1/embeddings")
     try:
         import httpx
+
         r = httpx.post(
             url,
             json={"input": "ping", "model": "bge-m3"},
@@ -440,7 +450,8 @@ def _run_bash_delegated_step(step: StepName) -> StepResult:
     if step == StepName.POSTGRES:
         if _pg_reachable():
             return StepResult(
-                step, "skipped",
+                step,
+                "skipped",
                 "postgres already reachable — nothing to do",
             )
         return StepResult(step, "failed", f"postgres not reachable. {_BOOTSTRAP_HINT}")
@@ -449,18 +460,21 @@ def _run_bash_delegated_step(step: StepName) -> StepResult:
             return StepResult(step, "failed", f"postgres not reachable. {_BOOTSTRAP_HINT}")
         if _hermes_template_exists() and _hermes_template_has_all_schemas():
             return StepResult(
-                step, "skipped",
+                step,
+                "skipped",
                 "5 PG extensions + 8 schemas already applied to hermes_template",
             )
         return StepResult(step, "failed", f"schemas not all applied. {_BOOTSTRAP_HINT}")
     if step == StepName.TEMPLATE:
         if _hermes_template_exists():
             return StepResult(
-                step, "skipped",
+                step,
+                "skipped",
                 "hermes_template database already exists",
             )
         return StepResult(
-            step, "failed",
+            step,
+            "failed",
             f"hermes_template not found. {_BOOTSTRAP_HINT}",
         )
     if step == StepName.PROFILE_DB:
@@ -476,6 +490,7 @@ def _run_bash_delegated_step(step: StepName) -> StepResult:
             try:
                 profile_dsn = dsn.rsplit("/", 1)[0] + f"/{target_db}"
                 import psycopg
+
                 with psycopg.connect(profile_dsn, connect_timeout=2) as c, c.cursor() as cur:
                     cur.execute(
                         "SELECT schema_name FROM information_schema.schemata "
@@ -485,23 +500,27 @@ def _run_bash_delegated_step(step: StepName) -> StepResult:
                     present = {r[0] for r in cur.fetchall()}
                 if present == set(_REQUIRED_SCHEMAS):
                     return StepResult(
-                        step, "skipped",
+                        step,
+                        "skipped",
                         f"{target_db} already cloned from hermes_template",
                     )
             except Exception:
                 pass
         return StepResult(
-            step, "failed",
+            step,
+            "failed",
             f"{target_db} not set up. {_BOOTSTRAP_HINT}",
         )
     if step == StepName.EMBEDDER:
         if _embedder_reachable():
             return StepResult(
-                step, "skipped",
+                step,
+                "skipped",
                 "bge-m3 embedder reachable — nothing to do",
             )
         return StepResult(
-            step, "failed",
+            step,
+            "failed",
             "embedder not reachable. Pull bge-m3: "
             "`docker run -d -p 11434:11434 ollama/ollama && "
             "ollama pull bge-m3`",
@@ -514,7 +533,9 @@ def _run_install(args: argparse.Namespace) -> int:
     steps_impl = {
         StepName.PREFLIGHT: lambda: PreflightStep(state_dir=HERMES_STATE_PATH.parent).run(),
         StepName.DSN: lambda: DsnStep(state_dir=HERMES_STATE_PATH.parent).run(),
-        StepName.REGISTER_PLUGIN: lambda: RegisterPluginStep(state_dir=HERMES_STATE_PATH.parent).run(),
+        StepName.REGISTER_PLUGIN: lambda: RegisterPluginStep(
+            state_dir=HERMES_STATE_PATH.parent
+        ).run(),
     }
 
     def runner(step: StepName) -> StepResult:
@@ -549,6 +570,7 @@ def _run_uninstall(args: argparse.Namespace) -> int:
     if surfaces:
         print(f"Step 1/4 — Export {', '.join(surfaces)} to default locations")
         from hermes_memory.uninstall.export import export_surfaces
+
         export_surfaces(surfaces)
 
     print("Step 2/4 — Unregister plugin from config.yaml")
@@ -565,6 +587,7 @@ def _run_uninstall(args: argparse.Namespace) -> int:
 
 def _unregister_plugin() -> None:
     from hermes_memory.install.steps import HERMES_CONFIG_PATH, PLUGIN_NAME
+
     if not HERMES_CONFIG_PATH.exists():
         return
     with HERMES_CONFIG_PATH.open() as f:

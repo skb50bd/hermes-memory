@@ -34,3 +34,4 @@ Thumbs.db
 .audit/
 **/__pycache__/
 src/hermes_memory.egg-info/
+uv.lock
