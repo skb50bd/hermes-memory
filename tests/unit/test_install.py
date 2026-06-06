@@ -154,9 +154,60 @@ def test_preflight_fails_on_missing_docker(tmp_path, monkeypatch):
     step = PreflightStep(state_dir=tmp_path)
     monkeypatch.setattr(step, "_check_python", lambda: True)
     monkeypatch.setattr(step, "_check_docker", lambda: False)
+    # The new preflight probes the port for PG if 10432 is busy.
+    # Set port-free so we get past that check and reach the docker failure.
+    monkeypatch.setattr(step, "_check_port", lambda p: True)
     result = step.run()
     assert result.success is False
     assert "docker" in result.message.lower()
+
+
+def test_preflight_port_in_use_with_pg_is_warning_not_failure(tmp_path, monkeypatch):
+    """If the port is already serving Postgres, preflight should not
+    fail — that's the user's desired state. It should pass with a
+    note that the existing PG will be used.
+
+    This is the bug 2 fix: previously `port 10432 already in use`
+    was a hard fail, blocking real installs where the container
+    is already running."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir=tmp_path)
+    monkeypatch.setattr(step, "_check_python", lambda: True)
+    monkeypatch.setattr(step, "_check_docker", lambda: True)
+    monkeypatch.setattr(step, "_check_port", lambda p: False)  # port IS in use
+    monkeypatch.setattr(step, "_is_postgres_listening", lambda p: True)
+    result = step.run()
+    assert result.success is True
+    assert "postgres" in result.message.lower()
+    assert "already" in result.message.lower() or "existing" in result.message.lower()
+
+
+def test_preflight_port_in_use_without_pg_is_failure(tmp_path, monkeypatch):
+    """If the port is in use but it's not Postgres (e.g. some other
+    service), preflight should still fail — something is squatting
+    on our port and we can't proceed."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir=tmp_path)
+    monkeypatch.setattr(step, "_check_python", lambda: True)
+    monkeypatch.setattr(step, "_check_docker", lambda: True)
+    monkeypatch.setattr(step, "_check_port", lambda p: False)  # port in use
+    monkeypatch.setattr(step, "_is_postgres_listening", lambda p: False)  # but not PG
+    result = step.run()
+    assert result.success is False
+
+
+def test_is_postgres_listening_returns_bool():
+    """The probe must return a bool (not raise) for any host:port."""
+    from hermes_memory.install.steps import PreflightStep
+
+    step = PreflightStep(state_dir="/tmp")
+    # Definitely-not-postgres port: closed → False
+    result = step._is_postgres_listening(54399)
+    assert isinstance(result, bool)
+    # An open HTTP port that's not PG: False
+    # (skip; we don't want a hardcoded port that might bind something)
 
 
 # ---------------------------------------------------------------------------

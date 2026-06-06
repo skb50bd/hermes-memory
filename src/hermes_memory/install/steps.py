@@ -21,7 +21,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 
@@ -53,13 +53,19 @@ __all__ = [
 @dataclass
 class _BaseStep:
     state_dir: Path
+    # Subclasses MUST set this to the StepName they correspond to.
+    # ClassVar (not a dataclass field) so subclasses can override cleanly.
+    step_name: ClassVar[StepName] = StepName.PREFLIGHT
 
     def run(self) -> StepResult:
         raise NotImplementedError
 
     def _result(self, success: bool, message: str) -> StepResult:
-        # NB: the step's name is filled in by the runner, not here.
-        return StepResult(step=StepName.PREFLIGHT, status="ran" if success else "failed", message=message)
+        return StepResult(
+            step=self.step_name,
+            status="ran" if success else "failed",
+            message=message,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +75,7 @@ class PreflightStep(_BaseStep):
     """Checks python version, docker presence, port availability."""
 
     REQUIRED_PYTHON = (3, 11)
+    step_name = StepName.PREFLIGHT
 
     def _check_python(self) -> bool:
         import sys
@@ -86,6 +93,29 @@ class PreflightStep(_BaseStep):
                 return False
             return True
 
+    def _is_postgres_listening(self, port: int) -> bool:
+        """Open a TCP connection to localhost:port and verify the
+        server speaks the Postgres protocol (issues an error response
+        to a startup message with an empty body — that's a PG server,
+        not a random TCP service).
+        """
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
+                # Postgres v3 startup packet: length(int32) + protocol(196608) + user/db
+                # Sending an empty/minimal startup gets us back an ErrorResponse
+                # which contains "SFATAL" or "C" codes — that's PG.
+                # Simpler heuristic: send the magic 8-byte request, see if
+                # we get a 1-byte response of any kind.
+                s.sendall(b"\x00\x00\x00\x08\x04\xd2\x16\x2f")  # SSL request
+                s.settimeout(2)
+                data = s.recv(1)
+                # PG responds with 'S' (allow SSL) or 'N' (no SSL), or
+                # 'E' (error). Anything else = not PG.
+                return bool(data) and data in (b"S", b"N", b"E")
+        except (TimeoutError, OSError):
+            return False
+
     def run(self) -> StepResult:
         issues: list[str] = []
         if not self._check_python():
@@ -93,7 +123,18 @@ class PreflightStep(_BaseStep):
         if not self._check_docker():
             issues.append("docker not found on PATH")
         if not self._check_port(10432):
-            issues.append("port 10432 already in use")
+            if self._is_postgres_listening(10432):
+                # Port is in use because Postgres is already there — that's
+                # the user's desired state. Not an issue; we just note it.
+                return self._result(
+                    True,
+                    "preflight ok (postgres already running on :10432 — "
+                    "will reuse existing container)",
+                )
+            issues.append(
+                "port 10432 already in use by something that is NOT "
+                "postgres — free the port or change HERMES_PG_PORT"
+            )
         if issues:
             return self._result(False, "; ".join(issues))
         return self._result(True, "preflight ok")
@@ -104,6 +145,8 @@ class PreflightStep(_BaseStep):
 # ---------------------------------------------------------------------------
 class DsnStep(_BaseStep):
     """Writes HERMES_PG_CONN_STR to ~/.hermes/.env. Idempotent."""
+
+    step_name = StepName.DSN
 
     def _format_env_line(self, dsn: str) -> str:
         return f'HERMES_PG_CONN_STR="{dsn}"\n'
@@ -127,6 +170,8 @@ class DsnStep(_BaseStep):
 class RegisterPluginStep(_BaseStep):
     """Wires config.yaml: memory.provider=postgres, plugins.enabled += plugin,
     and removes the old mcp_servers.hermes-memory block."""
+
+    step_name = StepName.REGISTER_PLUGIN
 
     def _load_config(self) -> dict[str, Any]:
         if not HERMES_CONFIG_PATH.exists():
