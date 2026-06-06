@@ -17,17 +17,15 @@
 #   install -m 0755 scripts/pre-commit .git/hooks/pre-commit
 #
 # Linters (must be on PATH):
-#   rtk     - Rust Token Killer; runs ruff/python, dotnet format, etc.
 #   ruff    - Python linter (also called via rtk)
-#   dotnet  - C# build + format
+#   rtk     - Rust Token Killer; runs ruff under the hood
 #
 # File-type dispatch:
-#   *.py        → ruff check (via rtk lint or direct ruff)
-#   *.cs        → dotnet build (compile errors block; warnings are OK)
-#   *.sql       → syntax check via psql --check or sqlfluff if available
+#   *.py        → ruff check
 #   *.sh        → shellcheck
-#   *.yaml,*.yml → yamllint
-#   *.json      → python -m json.tool
+#   *.yaml,*.yml → yamllint (or python3 yaml.safe_load fallback)
+#   *.json      → python3 -m json.tool
+#   *.sql       → non-empty check; full validation in CI integration tests
 #   Dockerfile  → hadolint if available, else no-op
 #   *           → no-op (unrecognized file type)
 #
@@ -76,20 +74,6 @@ for path in $STAGED; do
                 fi
             else
                 echo "${YEL}pre-commit: skip Python lint for $path (no ruff/rtk)${RST}"
-            fi
-            ;;
-        *.cs)
-            LINTED=$((LINTED+1))
-            # For C#, just check that the project still compiles. Skip
-            # formatting checks (dotnet format) because they auto-modify
-            # files and break the staged-vs-working-tree invariant.
-            if command -v dotnet >/dev/null 2>&1; then
-                if ! dotnet build --nologo --verbosity quiet 2>&1 | grep -E "error CS[0-9]+" >/dev/null; then
-                    echo "${GRN}pre-commit: dotnet build OK${RST}"
-                else
-                    echo "${RED}pre-commit: dotnet build failed for $path${RST}"
-                    FAILED=$((FAILED+1))
-                fi
             fi
             ;;
         *.sh)

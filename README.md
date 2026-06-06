@@ -1,145 +1,203 @@
 # hermes-memory
 
-Postgres-backed memory, wiki, journal, skills catalog, **kanban**,
-and operational metrics for the Hermes Agent platform. Single-binary,
-stdio MCP, NativeAOT.
+**v2.0.0 — pure-Python rewrite.** No more C#, no more MCP subprocess.
+A single PyPI package that registers 46 in-process tools with
+Hermes Agent, backed by PostgreSQL + pgvector.
 
-> 🚧 **v0.3.0 — kanban plugin ships.** The old
-> `~/.hermes/kanban/boards/*/kanban.db` SQLite files are now superseded
-> by a `hermes_kanban` schema in the same Postgres. Race-free dispatch
-> via `SELECT ... FOR UPDATE SKIP LOCKED`. **The new Python plugin is
-> the kanban provider; the old SQLite plugin is replaced by a thin
-> shim at `hermes_cli/kanban_db.py`.**
+> Closes issues
+> [#5](https://github.com/skb50bd/hermes-memory/issues/5)
+> (32 KB chunked memory with the routing rule baked in) and
+> [#8](https://github.com/skb50bd/hermes-memory/issues/8)
+> (the built-in `memory` tool now honours `memory.provider: postgres`).
 
 ## What you get
 
-| Surface | Storage | MCP tools |
+| Surface | Storage | Tools |
 |---|---|---|
-| **Memory** | `agent_memory.memories` (per-dim vector + FTS) | `memory_remember`, `memory_search`, `memory_forget`, `memory_status` |
-| **Wiki** | `hermes_wiki.documents` + `document_links` (recursive CTE for related/backlinks) | `wiki_create`, `wiki_read`, `wiki_link`, `wiki_backlinks`, `wiki_related`, `wiki_search` |
-| **Journal** | `hermes_journal.messages` (regular partitioned table) | `journal_log_session`, `journal_log_message`, `journal_search` |
+| **Memory** | `agent_memory.memories` + `memory_chunks` (per-dim vector + FTS) | `memory_remember`, `memory_search`, `memory_forget`, `memory_status` |
+| **Wiki** | `hermes_wiki.documents` + `document_links` | `wiki_create`, `wiki_read`, `wiki_link`, `wiki_backlinks`, `wiki_related`, `wiki_search` |
+| **Journal** | `hermes_journal.sessions` + `messages` (partitioned) | `journal_log_session`, `journal_log_message`, `journal_search` |
 | **Skills** | `hermes_skills.skills` + `skill_links` | `skill_index_search`, `skill_register`, `skill_link`, `skill_graph` |
-| **Metrics** | `hermes_metrics.events` (timescaledb hypertable) | `metrics_record`, `metrics_query` |
-| **Kanban** | `hermes_kanban.tasks` + 9 related tables (tenants, task_runs, task_events, task_links, task_comments, task_attachments, tags, task_tags, notify_subs) | 17 tools: `kanban_create`, `kanban_list`, `kanban_get`, `kanban_claim`, `kanban_heartbeat`, `kanban_complete`, `kanban_fail`, `kanban_comment`, `kanban_history`, `kanban_link`, `kanban_children`, `kanban_parents`, `kanban_tenants`, `kanban_tenant_create`, `kanban_subscribe`, `kanban_unsubscribe`, `kanban_search` |
+| **Metrics** | `hermes_metrics.events` (TimescaleDB hypertable) | `metrics_record`, `metrics_query` |
+| **Kanban** | `hermes_kanban.*` (9 tables) | 17 tools (`kanban_*`) |
+| **Observability** | `hermes_observability.*` | `obs_log`, `obs_record_llm`, `obs_record_tool`, `obs_flush` |
+| **Sessions** | `hermes_sessions.*` | `session_open`, `session_append`, `session_messages`, `session_lock_*`, `session_close` |
 
-The Python plugin at `~/repos/hermes-memory/plugins/kanban/postgres/`
-ships the runtime now. The C# binary is the long-term path but doesn't
-ship yet. The thin shim at `hermes_cli/kanban_db.py` makes the swap
-invisible to the dispatcher and dashboard.
-
-## Architecture
-
-```
-┌─────────────────────┐  HERMES_PG_CONN_STR  ┌──────────────────────────┐
-│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 5 exts    │
-│  (NativeAOT binary) │                      │  ┌──────────────────┐    │
-│                     │                      │  │ hermes_template  │    │
-│  --mcp   (stdio)    │                      │  └────────┬─────────┘    │
-│  preflight          │                      │           │ clone        │
-│  migrate            │                      │  ┌────────▼─────────┐    │
-│  profile create     │                      │  │ hermes_work      │    │
-│  embed              │                      │  │ hermes_personal  │    │
-│  version            │                      │  │ hermes_default   │    │
-└─────────────────────┘                      │  └──────────────────┘    │
-                                             └──────────────────────────┘
-```
-
-**One server, one database per agent profile.** Each agent's `.env`
-has `POSTGRES_DATABASE=hermes_<profile>`. The schemas are uniform
-because every profile DB is a byte-perfect clone of `hermes_template`.
-
-**5 schemas per database, not 5 databases.** Memory, wiki, journal,
-skills, and metrics all share a single Postgres cluster. The journal
-is a regular partitioned table; metrics is a timescaledb hypertable.
-They share the connection pool and the embedder cache.
+All 46 tools register **in-process** as hermes-agent plugins (via
+`ctx.register_tool()`). No MCP subprocess, no JSON-RPC overhead.
 
 ## Quickstart
 
 ```bash
-# 1. Pull the image (or build locally — see docker/README.md)
-docker pull ghcr.io/skb50bd/hermes-postgres:18
+# 1. Install
+pip install hermes-memory
 
-# 2. Start Postgres (clean cluster, no automatic init)
-docker run -d --name hermes-pg \
-    -e POSTGRES_PASSWORD=*** \
-    -e POSTGRES_USER=postgres \
-    -p 5432:5432 \
-    -v pgdata:/var/lib/postgresql/data \
-    ghcr.io/skb50bd/hermes-postgres:18
+# 2. Run the 8-step guided wizard
+hermes-memory install
 
-# 3. Initialize: creates hermes_template (5 schemas, 5 extensions) +
-#    hermes_cron (pg_cron with 2 jobs).
-docker exec hermes-pg /usr/local/bin/hermes-init.sh
+# 3. Restart hermes-agent so it picks up the new plugin
+hermes restart
 
-# 4. Create a per-agent database (byte-perfect clone of hermes_template)
-docker exec hermes-pg psql -U postgres -c "CREATE DATABASE hermes_work TEMPLATE hermes_template CONNECTION LIMIT 20"
-
-# 5. Connect and use
-export HERMES_PG_CONN_STR='postgresql://postgres:***@localhost:5432/hermes_work'
-psql -c "SELECT count(*) FROM pg_extension;"      # 6 (5 + plpgsql)
-psql -c "SELECT schemaname, count(*) FROM pg_tables
-         WHERE schemaname LIKE 'hermes_%' OR schemaname='agent_memory'
-         GROUP BY schemaname;"
+# That's it. The 'memory' tool is now backed by postgres.
 ```
+
+The wizard:
+
+1. **Preflight** — checks Python ≥ 3.11, docker, port 10432
+2. **Postgres** — pulls `ghcr.io/skb50bd/hermes-memory/hermes-postgres:latest`
+3. **Extensions** — installs `vector`, `pg_trgm`, `ltree`, `age`, `pg_cron`, `timescaledb`
+4. **Template** — creates `hermes_template` (8 schemas)
+5. **Profile DB** — clones `hermes_template` → `hermes_<profile>`
+6. **DSN** — writes `HERMES_PG_CONN_STR` to `~/.hermes/.env`
+7. **Embedder** — verifies `bge-m3` (default) via local Ollama
+8. **Register** — sets `memory.provider: postgres`, adds the plugin to `plugins.enabled`, removes the old `mcp_servers.hermes-memory` block
+
+State is recorded in `~/.hermes/state/hermes-memory.json` so
+`hermes-memory install` is **idempotent** — re-running skips
+completed steps.
+
+## Memory vs Wiki routing rule
+
+The `memory_remember` tool rejects content > 32 KB with a
+routing-rule error message that points the agent at `wiki_create`:
+
+```
+Memory size 32,769 chars exceeds the 32,000-char cap (MEMORY_MAX_CHARS).
+
+Routing rule:
+  • MEMORY  — short, durable facts (< 1 screen). Stored via
+              memory_remember. Surface: system prompt + searches.
+  • WIKI    — long-form, structured, multi-paragraph. Stored via
+              wiki_create. Surface: explicit reads, cross-linked.
+  • SESSION — never persist; use session_search.
+
+Did you mean: wiki_create with category="projects.<name>"?
+```
+
+Long content (< 32 KB but > 2 KB) is auto-chunked into 512-token
+overlapping windows stored in `agent_memory.memory_chunks`. Each
+chunk gets its own embedding; `memory_search` returns the parent
+memory (deduped by `memory_id`).
 
 ## Architecture
 
 ```
-┌─────────────────────┐  HERMES_PG_CONN_STR  ┌──────────────────────────┐
-│  hermes-memory      │ ────────────────────▶│  Postgres 18 + 5 exts    │
-│  (NativeAOT binary) │                      │  ┌──────────────────┐    │
-│                     │                      │  │ hermes_template  │    │
-│  --mcp   (stdio)    │                      │  │ (5 schemas,      │    │
-│  preflight          │                      │  │  5 extensions)   │    │
-│  migrate            │                      │  └────────┬─────────┘    │
-│  profile create     │                      │           │ clone        │
-│  embed              │                      │  ┌────────▼─────────┐    │
-│  version            │                      │  │ hermes_work      │    │
-└─────────────────────┘                      │  │ hermes_personal  │    │
-                                             │  │ hermes_default   │    │
-                                             │  └──────────────────┘    │
-                                             │  ┌──────────────────┐    │
-                                             │  │ hermes_cron      │    │
-                                             │  │ (pg_cron + jobs) │    │
-                                             │  └──────────────────┘    │
-                                             └──────────────────────────┘
-```
+┌──────────────────────────┐  HERMES_PG_CONN_STR  ┌──────────────────────┐
+│  hermes-agent            │ ────────────────────▶│  Postgres 18 + 6 exts│
+│  (no changes needed)     │                      │  ┌──────────────────┐│
+│                          │                      │  │ hermes_template  ││
+│  plugin loader           │                      │  └────────┬─────────┘│
+│    ↓                    │                      │           │ clone    │
+│  hermes-postgres-memory  │                      │  ┌────────▼─────────┐│
+│    ↓ register(ctx)      │                      │  │ hermes_default   ││
+│  46 in-process tools     │                      │  │ hermes_fluffy    ││
+│    ↓ 35+ memories, wiki │                      │  │ hermes_boltu     ││
+│       kanban, etc.      │                      │  │ ...              ││
+│  + memory override (#8) │                      │  └──────────────────┘│
+└──────────────────────────┘                      └──────────────────────┘
 ```
 
-## Embedders
+**No MCP server. No `mcp_servers.hermes-memory` block in config.yaml.**
+The plugin registers its tools directly with the hermes-agent
+process; the `memory` tool is overridden in-process via the new
+`override_builtin=True` flag on `register_tool()` (one tiny PR to
+hermes-agent, ~10 LOC).
 
-The default embedder is **Kimi BGE-M3** (free, 1024-dim, MTEB
-top-tier). Set `KIMI_API_KEY` in the env. Alternatives:
+## CLI
 
-| Dim | Provider | Model | API key env |
-|---|---|---|---|
-| 768 | `ollama_local` | `nomic-embed-text` | (none) |
-| 1024 | `kimi` (default) | `bge_m3_embed` | `KIMI_API_KEY` |
-| 1536 | `kimi` | `bge_m3_embed` | `KIMI_API_KEY` |
+```
+hermes-memory install       # 8-step wizard
+hermes-memory uninstall     # strip plugin + optional data export
+hermes-memory status        # show install state + PG connection
+hermes-memory doctor        # health checks (issue #6 — partial)
+hermes-memory migrate       # apply SQL migrations to a DSN
+hermes-memory export        # dump a surface to JSON/Markdown/SQLite
+hermes-memory import        # restore from an export file
+hermes-memory rollback      # restore local MEMORY.md from postgres
+hermes-memory --version
+```
 
-Per-dim overrides via `HERMES_EMBED_PROVIDER_<dim>`,
-`HERMES_EMBED_MODEL_<dim>`, `HERMES_EMBED_API_KEY_<dim>`,
-`HERMES_EMBED_CACHE_DIR_<dim>`. The cache root defaults to
-`~/.cache/hermes/embeddings/<dim>/`.
+`hermes-memory uninstall --export memory,wiki,kanban,sessions,metrics`
+exports each surface to its default file location before tearing
+down the plugin (per the 2026-06-06 user clarification):
 
-**Fail-open policy**: provider errors substitute a zero vector and
-return success. Zero vectors from the fail-open path are **never
-cached** (poison prevention). The `noop` provider deliberately
-returns zeros and DOES cache.
+| Surface   | Default location |
+|-----------|-----------------|
+| memory    | `~/.hermes/memories/MEMORY.md` (markdown bullet list) |
+| wiki      | `~/.hermes/wiki/<slug>.md` (per-slug markdown) |
+| kanban    | `~/.hermes/kanban/boards/<tenant>/kanban.json` (manifest; SQLite in v2.1) |
+| sessions  | `~/.hermes/sessions/YYYY-MM-DD/session_<id>.jsonl` |
+| metrics   | `~/.hermes/metrics/events.jsonl` |
+| journal   | `~/.hermes/journal/<sid>.jsonl` (deferred) |
+| skills    | `~/.hermes/skills/index.json` (deferred) |
 
-## Roadmap to v1.0
+## `hermes update` is a no-op for the memory surface
 
-- [x] Repository scaffold (this commit)
-- [x] 5 schemas baked into `hermes_template`
-- [x] C# NativeAOT binary with stdio MCP server
-- [x] Embedder cache + per-dim registry
-- [x] Back-compat shim for the old `pg_*` Python plugin
-- [ ] Npgsql + AOT type-registration spike (week 1)
-- [ ] All 20 MCP tools exercised by integration tests
-- [ ] CI green: docker + unit + integration
-- [ ] First tagged release (v0.2.0)
-- [ ] Real Cypher queries via Apache AGE (v0.3.0+)
+The plugin is installed as a pip package at
+`~/.hermes/plugins/hermes-postgres-memory/` (the user-plugins path,
+not the bundled-plugins path). After install, the hermes-agent repo
+working tree is **clean**:
+
+```bash
+$ git -C ~/.hermes/hermes-agent status --porcelain
+# (empty)
+```
+
+`hermes update` no longer touches any hermes-memory file. No
+symlinks, no shims, no `agent_init.py` patches, no `mcp_servers`
+block. Verified by the install wizard + the non-invasion check in
+the docs.
+
+## Development
+
+```bash
+git clone https://github.com/skb50bd/hermes-memory
+cd hermes-memory
+pip install -e ".[dev]"
+
+# Run unit tests (no PG required)
+pytest tests/unit/
+
+# Run integration tests (Testcontainers Postgres)
+pytest tests/integration/
+
+# Lint
+ruff check src tests
+```
+
+The 8-step install wizard lives at `src/hermes_memory/install/`.
+The plugin entry point is `src/hermes_memory/register.py`.
+
+## What's NOT in v2.0.0
+
+- **SQL for 7 of 8 surfaces.** `PgMemoryRepo` is fully implemented
+  (chunked insert, hybrid FTS+vector search, dedup, forget, status).
+  `PgWikiRepo`, `PgJournalRepo`, `PgSkillsRepo`, `PgMetricsRepo`,
+  `PgKanbanRepo`, `PgObservabilityRepo`, `PgSessionsRepo` ship as
+  stubs that raise `NotImplementedError` for writes and return
+  empty results for reads. Landed as a follow-up.
+- **Issue #6** (hermes doctor full check list) and **#7** (dump/restore
+  tooling) deferred to v2.1.
+- **Per-profile DB creation** uses the existing `hermes-bootstrap.sh`
+  flow inside the Docker image; the new install wizard delegates to
+  it via subprocess.
+- **SQLite kanban export.** v2.0 writes a JSON manifest per tenant;
+  full SQLite export lands in v2.1.
+
+## Migration from v1 (C# + MCP)
+
+1. `pip install hermes-memory`
+2. `hermes-memory install` (it's idempotent — re-running the v1
+   install.sh first is safe)
+3. The install wizard detects the old `mcp_servers.hermes-memory`
+   block in `~/.hermes/config.yaml` and **removes it** (so the C#
+   binary stops being launched)
+4. `hermes restart`
+
+No data migration needed — the same Postgres database (same DSN,
+same schemas) works for both the C# stdio MCP server and the new
+in-process Python plugin.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT. See [LICENSE](LICENSE).
