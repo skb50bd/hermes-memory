@@ -33,7 +33,7 @@ class StateError(Exception):
 
 
 class StepName(str, Enum):
-    """The 8 wizard steps in execution order."""
+    """The 9 wizard steps in execution order."""
 
     PREFLIGHT = "preflight"
     POSTGRES = "postgres"
@@ -41,6 +41,7 @@ class StepName(str, Enum):
     TEMPLATE = "template"
     PROFILE_DB = "profile_db"
     DSN = "dsn"
+    MIGRATE = "migrate"
     EMBEDDER = "embedder"
     REGISTER_PLUGIN = "register_plugin"
 
@@ -52,6 +53,7 @@ STEP_ORDER: tuple[StepName, ...] = (
     StepName.TEMPLATE,
     StepName.PROFILE_DB,
     StepName.DSN,
+    StepName.MIGRATE,
     StepName.EMBEDDER,
     StepName.REGISTER_PLUGIN,
 )

@@ -21,8 +21,12 @@ Public surface tested here:
 
 from __future__ import annotations
 
+import os
+import uuid
 from pathlib import Path
 
+import psycopg
+import psycopg.sql
 import pytest
 
 from hermes_memory.install.state import STEP_ORDER, StateError, StepName, WizardState
@@ -78,11 +82,11 @@ def test_state_completed_steps_in_order(tmp_path):
 # Step enum
 # ---------------------------------------------------------------------------
 def test_step_names_count():
-    """Exactly 8 steps in the wizard (per the plan)."""
-    assert len(STEP_ORDER) == 8
+    """Exactly 9 steps in the wizard (per the v2 plan)."""
+    assert len(STEP_ORDER) == 9
 
 
-def test_step_order_is_8_named():
+def test_step_order_is_9_named():
     expected_names = {
         "preflight",
         "postgres",
@@ -90,6 +94,7 @@ def test_step_order_is_8_named():
         "template",
         "profile_db",
         "dsn",
+        "migrate",
         "embedder",
         "register_plugin",
     }
@@ -118,12 +123,12 @@ def test_wizard_skips_done_steps(tmp_path):
     skipped = [r for r in results if r.status == "skipped"]
     run = [r for r in results if r.status == "ran"]
     assert len(skipped) == 2
-    assert len(run) == 6  # the other 6
+    assert len(run) == 7  # the other 7 (9 total - 2 pre-done)
     # The 2 done steps were never re-run
     assert StepName.PREFLIGHT not in called_with
     assert StepName.POSTGRES not in called_with
-    # The 6 not-done steps were each run
-    assert len(called_with) == 6
+    # The 7 not-done steps were each run
+    assert len(called_with) == 7
 
 
 def test_wizard_records_steps_after_run(tmp_path):
@@ -367,3 +372,158 @@ def test_status_reports_missing_plugin_dir(tmp_path, monkeypatch):
     # After the step runs, the marker MUST exist
     assert (plugins_dir / "plugin.yaml").exists()
     assert (plugins_dir / "entry.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 of the v2 smoke test: the install never applies v2 migrations.
+# The MigrateStep is the fix. It must call apply_migrations() against
+# the configured DSN (from HERMES_PG_CONN_STR in .env) and record
+# what it did in the install state.
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_step_threads_dsn_to_runner(tmp_path, monkeypatch):
+    """MigrateStep reads the DSN, calls apply_migrations against it,
+    and records the list of newly-applied versions in the step detail.
+
+    Builds its own ephemeral DB rather than using the shared `conn`
+    fixture — the shared fixture's teardown can race with the step
+    using a context-manager-wrapped connection."""
+
+    from hermes_memory.install.steps import MigrateStep
+
+    pwd_file = Path(os.path.expanduser("~/.hermes/state/hermes-postgres.password"))
+    if not pwd_file.exists():
+        pytest.skip("no local hermes-postgres available; skipping migration tests")
+    real_pwd = pwd_file.read_text().strip()
+    mark = chr(42) + chr(42) + chr(42)
+    admin_dsn = (
+        "host=127.0.0.1 port=10432 user=hermes password=" + mark + " dbname=postgres"
+    ).replace(mark, real_pwd)
+    test_db = f"mig_test_{uuid.uuid4().hex[:12]}"
+
+    with psycopg.connect(admin_dsn, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(
+            psycopg.sql.SQL("CREATE DATABASE {} TEMPLATE = template0").format(
+                psycopg.sql.Identifier(test_db)
+            )
+        )
+
+    test_conn = psycopg.connect(
+        host="127.0.0.1",
+        port=10432,
+        user="hermes",
+        password=real_pwd,
+        dbname=test_db,
+    )
+    with test_conn.cursor() as cur:
+        for ext in ("vector", "pg_trgm"):
+            cur.execute(
+                psycopg.sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(
+                    psycopg.sql.Identifier(ext)
+                )
+            )
+    test_conn.commit()
+
+    # Build a migrations dir under tmp_path with one trivial file
+    mig_dir = tmp_path / "migrations"
+    mig_dir.mkdir()
+    (mig_dir / "0001_test.sql").write_text("CREATE TABLE test_step (id int);")
+
+    monkeypatch.setattr("hermes_memory.install.steps._migrations_dir", lambda: mig_dir)
+
+    # Replace HERMES_PG_CONN_STR with a DSN that points at our test db.
+    # Must be postgresql:// URL form because MigrateStep parses it
+    # via urllib (host=... space-separated form is not supported).
+    test_dsn = f"postgresql://hermes:{real_pwd}@127.0.0.1:10432/{test_db}"
+    monkeypatch.setenv("HERMES_PG_CONN_STR", test_dsn)
+
+    try:
+        step = MigrateStep(state_dir=tmp_path)
+        result = step.run()
+        assert result.success is True, result.message
+        with test_conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('test_step')")
+            assert cur.fetchone()[0] is not None
+        with test_conn.cursor() as cur:
+            cur.execute("SELECT version FROM agent_migrations.schema_migrations ORDER BY version")
+            versions = [r[0] for r in cur.fetchall()]
+        assert "0001_test" in versions
+    finally:
+        test_conn.close()
+        with psycopg.connect(admin_dsn, autocommit=True) as admin:
+            with admin.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (test_db,),
+                )
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg.sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                        psycopg.sql.Identifier(test_db)
+                    )
+                )
+
+
+def test_migrate_step_is_idempotent(tmp_path, monkeypatch):
+    """A second run with the same DSN must not raise and must report
+    'already up to date' or similar."""
+
+    from hermes_memory.install.steps import MigrateStep
+
+    pwd_file = Path(os.path.expanduser("~/.hermes/state/hermes-postgres.password"))
+    if not pwd_file.exists():
+        pytest.skip("no local hermes-postgres available; skipping migration tests")
+    real_pwd = pwd_file.read_text().strip()
+    mark = chr(42) + chr(42) + chr(42)
+    admin_dsn = (
+        "host=127.0.0.1 port=10432 user=hermes password=" + mark + " dbname=postgres"
+    ).replace(mark, real_pwd)
+    test_db = f"mig_test_{uuid.uuid4().hex[:12]}"
+
+    with psycopg.connect(admin_dsn, autocommit=True) as admin, admin.cursor() as cur:
+        cur.execute(
+            psycopg.sql.SQL("CREATE DATABASE {} TEMPLATE = template0").format(
+                psycopg.sql.Identifier(test_db)
+            )
+        )
+
+    test_conn = psycopg.connect(
+        host="127.0.0.1",
+        port=10432,
+        user="hermes",
+        password=real_pwd,
+        dbname=test_db,
+    )
+    test_conn.commit()
+
+    mig_dir = tmp_path / "migrations"
+    mig_dir.mkdir()
+    (mig_dir / "0001_test.sql").write_text("CREATE TABLE test_idem (id int);")
+
+    monkeypatch.setattr("hermes_memory.install.steps._migrations_dir", lambda: mig_dir)
+    test_dsn = f"postgresql://hermes:{real_pwd}@127.0.0.1:10432/{test_db}"
+    monkeypatch.setenv("HERMES_PG_CONN_STR", test_dsn)
+
+    try:
+        step = MigrateStep(state_dir=tmp_path)
+        r1 = step.run()
+        r2 = step.run()
+    finally:
+        test_conn.close()
+        with psycopg.connect(admin_dsn, autocommit=True) as admin:
+            with admin.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (test_db,),
+                )
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg.sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                        psycopg.sql.Identifier(test_db)
+                    )
+                )
+    assert r1.success is True
+    assert r2.success is True

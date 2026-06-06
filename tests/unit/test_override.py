@@ -250,6 +250,102 @@ def test_memory_tool_uses_postgres_when_auto_and_repo_available(monkeypatch, rep
 
 
 # ---------------------------------------------------------------------------
+# Bug 3: _read_provider must consult ~/.hermes/config.yaml's memory.provider
+# when MEMORY_PROVIDER env var is unset. Issue #8 root cause.
+# ---------------------------------------------------------------------------
+def test_read_provider_prefers_env_var(monkeypatch, tmp_path):
+    """MEMORY_PROVIDER env var wins over config.yaml."""
+    from hermes_memory.override import _read_provider
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("memory:\n  provider: local\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("MEMORY_PROVIDER", "postgres")
+    assert _read_provider() == PROVIDER_POSTGRES
+
+
+def test_read_provider_falls_back_to_config_yaml(monkeypatch, tmp_path):
+    """When env var is unset, read memory.provider from config.yaml."""
+    from hermes_memory.override import _read_provider
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("memory:\n  provider: postgres\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    assert _read_provider() == PROVIDER_POSTGRES
+
+
+def test_read_provider_config_yaml_local(monkeypatch, tmp_path):
+    """config.yaml can also pin local."""
+    from hermes_memory.override import _read_provider
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("memory:\n  provider: local\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    assert _read_provider() == PROVIDER_LOCAL
+
+
+def test_read_provider_defaults_to_local_when_no_signal(monkeypatch, tmp_path):
+    """No env var AND no config.yaml → local."""
+    from hermes_memory.override import _read_provider
+
+    (tmp_path / "config.yaml").write_text("unrelated_key: 1\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    assert _read_provider() == PROVIDER_LOCAL
+
+
+def test_read_provider_handles_missing_config_yaml(monkeypatch, tmp_path):
+    """If config.yaml doesn't exist, default to local (env-var-only path)."""
+    from hermes_memory.override import _read_provider
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    # No file written
+    assert _read_provider() == PROVIDER_LOCAL
+
+
+def test_read_provider_handles_malformed_config_yaml(monkeypatch, tmp_path):
+    """Malformed YAML must not raise; fall back to local."""
+    from hermes_memory.override import _read_provider
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("this: is: not: valid: yaml: : :\n  bad indent\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    assert _read_provider() == PROVIDER_LOCAL
+
+
+def test_memory_tool_routes_to_postgres_from_config_yaml(monkeypatch, tmp_path, repo):
+    """End-to-end: config.yaml says postgres → memory_tool uses PG path."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("memory:\n  provider: postgres\n")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    out = memory_tool("add", content="hello", repo=repo)
+    data = json.loads(out)
+    # PG path stores with id; local path stores with status + path
+    assert "id" in data
+    assert data["status"] == "stored"
+
+
+def test_memory_tool_routes_to_local_from_config_yaml(monkeypatch, tmp_path):
+    """End-to-end: config.yaml says local → memory_tool uses local path."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("memory:\n  provider: local\n")
+    local = tmp_path / "MEMORY.md"
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("MEMORY_LOCAL_PATH", str(local))
+    monkeypatch.delenv("MEMORY_PROVIDER", raising=False)
+    out = memory_tool("add", content="hello")
+    data = json.loads(out)
+    assert data["status"] == "stored"
+    assert data["mode"] == "local"
+    assert local.read_text() == "- hello\n"
+
+
+# ---------------------------------------------------------------------------
 # build_memory_block
 # ---------------------------------------------------------------------------
 def test_build_memory_block_with_repo(repo):

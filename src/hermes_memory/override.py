@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Literal
 
 from hermes_memory.repos.memory_repo import (
@@ -47,8 +48,50 @@ PROVIDER_AUTO = "auto"
 
 
 def _read_provider() -> str:
-    """Read memory.provider from env. Defaults to 'local'."""
-    return os.environ.get("MEMORY_PROVIDER", PROVIDER_LOCAL).strip().lower()
+    """Read memory.provider from env (priority) or ~/.hermes/config.yaml.
+
+    Resolution order:
+      1. ``MEMORY_PROVIDER`` env var (most explicit, override-friendly)
+      2. ``memory.provider`` field in ``$HERMES_HOME/config.yaml`` (or
+         ``~/.hermes/config.yaml`` when HERMES_HOME is unset)
+      3. default: ``"local"``
+
+    Defensive: malformed YAML, missing file, or non-string value falls
+    back to ``"local"`` rather than raising — this runs in the hot path
+    of every memory tool call.
+    """
+    env_val = os.environ.get("MEMORY_PROVIDER", "").strip().lower()
+    if env_val:
+        return env_val
+
+    # Fall back to config.yaml
+    hermes_home = os.environ.get("HERMES_HOME", "").strip() or os.path.expanduser("~/.hermes")
+    config_path = Path(hermes_home) / "config.yaml"
+    if not config_path.is_file():
+        return PROVIDER_LOCAL
+
+    try:
+        import yaml  # local import — PyYAML is a runtime dep
+
+        with config_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception:
+        # Malformed YAML, permission error, encoding error — never block
+        # the agent's memory call because we couldn't read the config.
+        return PROVIDER_LOCAL
+
+    if not isinstance(data, dict):
+        return PROVIDER_LOCAL
+    memory_section = data.get("memory")
+    if not isinstance(memory_section, dict):
+        return PROVIDER_LOCAL
+    cfg_val = memory_section.get("provider")
+    if not isinstance(cfg_val, str):
+        return PROVIDER_LOCAL
+    cfg_val = cfg_val.strip().lower()
+    if cfg_val in (PROVIDER_POSTGRES, PROVIDER_LOCAL, PROVIDER_AUTO):
+        return cfg_val
+    return PROVIDER_LOCAL
 
 
 def _read_local_store_path() -> str:

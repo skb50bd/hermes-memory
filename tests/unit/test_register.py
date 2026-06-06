@@ -103,8 +103,9 @@ def test_register_tool_schemas_have_description(ctx):
         assert schema["description"], f"tool {entry['name']} has empty description"
 
 
-def test_register_calls_handler_with_kwargs(ctx):
+def test_register_calls_handler_with_kwargs(ctx, tmp_path, monkeypatch):
     """The memory tool's handler accepts **kwargs and forwards to override."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))  # isolate from user's config.yaml
     _inject_fake_repos()
     register(ctx)
     memory = ctx.tools[("memory", "hermes_postgres_memory")]

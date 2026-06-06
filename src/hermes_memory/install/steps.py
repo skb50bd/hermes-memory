@@ -26,6 +26,11 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, ClassVar
 
+# Re-exported at module scope so test monkeypatching on
+# ``hermes_memory.install.steps.psycopg.connect`` can resolve the
+# attribute. MigrateStep's run() also imports it locally; both paths
+# refer to the same module object.
+import psycopg  # noqa: F401  (re-export for tests)
 import yaml
 
 from hermes_memory.install.paths import (
@@ -181,6 +186,106 @@ class DsnStep(_BaseStep):
                 f.write("\n")
             f.write(self._format_env_line(dsn))
         return self._result(True, f"wrote HERMES_PG_CONN_STR to {HERMES_ENV_PATH}")
+
+
+# ---------------------------------------------------------------------------
+# 6. Migrate — apply v2 SQL migrations to the profile DB.
+# ---------------------------------------------------------------------------
+def _migrations_dir() -> Path:
+    """Path to the v2 SQL migration files. Ships inside the v2 package."""
+    from importlib import resources
+
+    return Path(str(resources.files("hermes_memory"))) / "migrations"
+
+
+class MigrateStep(_BaseStep):
+    """Apply v2 SQL migrations to the configured DSN.
+
+    Fixes Bug 1 of the v2 live smoke test: the install used to clone
+    hermes_template -> hermes_<profile> and stop, leaving the profile
+    DB without the v2 schema (e.g. agent_memory.memory_chunks). Every
+    long memory_remember failed with UndefinedTable.
+
+    Also runs sync_sequences() afterwards to fix Bug 2: the
+    bigserial sequences can lag behind the table's MAX(id) when
+    prior installs backfilled rows with explicit IDs.
+
+    Idempotent: re-runs are no-ops for already-applied versions.
+    """
+
+    step_name = StepName.MIGRATE
+
+    def _resolve_dsn(self) -> str:
+        """DSN to migrate. Prefer the DsnStep output, then env, then default."""
+        dsn = os.environ.get("HERMES_PG_CONN_STR", "").strip()
+        if not dsn:
+            dsn = HERMES_PG_CONN_STR_DEFAULT
+        return dsn
+
+    def run(self) -> StepResult:
+        # Imported here to keep module import-time lean, but also bound
+        # as a module-level attribute below so tests can monkeypatch
+        # ``hermes_memory.install.steps.psycopg.connect`` (the patch
+        # path requires the module attribute to exist).
+
+        from hermes_memory.migrate import apply_migrations, sync_sequences
+
+        dsn = self._resolve_dsn()
+        mig_dir = _migrations_dir()
+        if not mig_dir.is_dir():
+            return self._result(
+                False,
+                f"migrations dir not found: {mig_dir} (v2 install is missing SQL files)",
+            )
+        # Open the conn via psycopg using kwargs (libpq in the agent
+        # venv can drop the dbname from a space-separated DSN, so
+        # we never go through a DSN string here).
+        # The DSN we have is in the form postgresql://user:pass@host:port/db
+        # — parse it to kwargs so we sidestep that bug.
+        kwargs = _parse_dsn_to_kwargs(dsn)
+        try:
+            with psycopg.connect(**kwargs) as conn:
+                newly_applied = apply_migrations(conn, mig_dir)
+                synced = sync_sequences(conn)
+        except Exception as e:
+            return self._result(
+                False,
+                f"migration apply failed: {type(e).__name__}: {e}",
+            )
+        n_new = len(newly_applied)
+        n_synced = len(synced)
+        if n_new == 0 and n_synced == 0:
+            return self._result(True, "schema up to date, sequences in sync")
+        return self._result(
+            True,
+            f"applied {n_new} new migration(s); synced {n_synced} sequence(s) "
+            f"(latest: {newly_applied[-1] if newly_applied else 'none'})",
+        )
+
+
+def _parse_dsn_to_kwargs(dsn: str) -> dict[str, Any]:
+    """Parse a postgresql:// DSN into psycopg connect() kwargs.
+
+    Avoids the libpq quirk where dbname in a space-separated DSN
+    can be silently dropped in some psycopg builds (observed in
+    the agent venv, 2026-06-06)."""
+    from urllib.parse import unquote, urlparse
+
+    p = urlparse(dsn)
+    if p.scheme not in ("postgresql", "postgres"):
+        raise ValueError(f"unsupported DSN scheme: {p.scheme}")
+    out: dict[str, Any] = {}
+    if p.hostname:
+        out["host"] = p.hostname
+    if p.port:
+        out["port"] = p.port
+    if p.username:
+        out["user"] = unquote(p.username)
+    if p.password is not None:
+        out["password"] = unquote(p.password)
+    if p.path and p.path != "/":
+        out["dbname"] = p.path.lstrip("/")
+    return out
 
 
 # ---------------------------------------------------------------------------
