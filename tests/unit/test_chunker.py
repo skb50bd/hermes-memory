@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_memory.embeddings.chunker import chunk_text, Chunk
+from hermes_memory.embeddings.chunker import Chunk, chunk_text
 
 
 # ---------------------------------------------------------------------------

@@ -22,11 +22,11 @@ from __future__ import annotations
 import pytest
 
 from hermes_memory.repos.memory_repo import (
-    MemoryRepo,
+    MEMORY_MAX_CHARS,
     Memory,
     MemoryNotFoundError,
+    MemoryRepo,
     RoutingRuleViolationError,
-    MEMORY_MAX_CHARS,
 )
 
 

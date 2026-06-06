@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import json
 
-from hermes_memory.repos.memory_repo import (
-    MemoryRepo, Memory, MemoryNotFoundError, MEMORY_MAX_CHARS,
-)
-from hermes_memory.repos.wiki_repo import WikiRepo, Document
 from hermes_memory.repos.kanban_repo import KanbanRepo, Task, Tenant
+from hermes_memory.repos.memory_repo import (
+    MEMORY_MAX_CHARS,
+    Memory,
+    MemoryNotFoundError,
+    MemoryRepo,
+)
+from hermes_memory.repos.wiki_repo import Document, WikiRepo
 from hermes_memory.tools import (
-    make_memory_tools, make_wiki_tools, make_kanban_tools, make_all_tools,
+    make_all_tools,
+    make_kanban_tools,
+    make_memory_tools,
+    make_wiki_tools,
 )
 
 

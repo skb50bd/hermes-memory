@@ -47,7 +47,12 @@ ignore = ["E501"]  # long lines are OK in test code
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011"]  # asserts are fine in tests
-"src/hermes_memory/**" = ["UP037", "SIM117", "SIM102"]  # cosmetic; readability wins
+"src/hermes_memory/**" = [
+    "UP037",   # quoted forward refs in heavy use
+    "SIM117",  # cosmetic; readability wins
+    "SIM102",  # cosmetic; readability wins
+    "UP042",   # StrEnum migration is a 3.11+ thing; not blocking
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration"]

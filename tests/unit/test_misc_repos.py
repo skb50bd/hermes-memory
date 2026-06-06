@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timedelta
 
+import pytest
+
 from hermes_memory.repos.journal_repo import JournalRepo, Message
-from hermes_memory.repos.skills_repo import SkillsRepo, Skill
-from hermes_memory.repos.metrics_repo import MetricsRepo, MetricPoint
+from hermes_memory.repos.metrics_repo import MetricPoint, MetricsRepo
+from hermes_memory.repos.skills_repo import Skill, SkillsRepo
 
 
 # ---------------------------------------------------------------------------

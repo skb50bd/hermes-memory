@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_memory.repos.wiki_repo import WikiRepo, Document
+from hermes_memory.repos.wiki_repo import Document, WikiRepo
 
 
 class FakeWikiRepo(WikiRepo):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hermes_memory.repos.kanban_repo import KanbanRepo, Task, Event, Tenant
+from hermes_memory.repos.kanban_repo import Event, KanbanRepo, Task, Tenant
 
 
 class FakeKanbanRepo(KanbanRepo):

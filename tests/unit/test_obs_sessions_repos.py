@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timedelta
 
+import pytest
+
 from hermes_memory.repos.observability_repo import (
-    ObservabilityRepo, LogEvent, LLMCall, ToolCall, redact_dict,
+    LLMCall,
+    LogEvent,
+    ObservabilityRepo,
+    ToolCall,
+    redact_dict,
 )
-from hermes_memory.repos.sessions_repo import SessionsRepo, SessionMessage
+from hermes_memory.repos.sessions_repo import SessionMessage, SessionsRepo
 
 
 # ---------------------------------------------------------------------------
