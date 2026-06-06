@@ -99,9 +99,10 @@ memory (deduped by `memory_id`).
 
 **No MCP server. No `mcp_servers.hermes-memory` block in config.yaml.**
 The plugin registers its tools directly with the hermes-agent
-process; the `memory` tool is overridden in-process via the new
-`override_builtin=True` flag on `register_tool()` (one tiny PR to
-hermes-agent, ~10 LOC).
+process; the `memory` tool is overridden in-process via the existing
+`override=True` flag on `ctx.register_tool()` — already present in
+`hermes_cli/plugins.py:319` and `tools/registry.py:247`. **No
+upstream PR is required.**
 
 ## CLI
 
@@ -197,6 +198,12 @@ The plugin entry point is `src/hermes_memory/register.py`.
 No data migration needed — the same Postgres database (same DSN,
 same schemas) works for both the C# stdio MCP server and the new
 in-process Python plugin.
+
+**No upstream PR is needed.** hermes-agent's `register_tool()` has
+supported `override=True` for built-in tool replacement since the
+`browser_navigate` CDP-swap pattern landed (see
+`hermes_cli/plugins.py:319` and `tools/registry.py:247`). The v2
+plugin uses the same flag to override the `memory` tool.
 
 ## License
 
