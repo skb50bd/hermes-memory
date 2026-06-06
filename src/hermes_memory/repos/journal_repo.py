@@ -9,8 +9,7 @@ Public surface (from JournalTools.cs):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
-
+from typing import Any, Literal
 
 Role = Literal["user", "assistant", "tool", "system"]
 
@@ -21,7 +20,7 @@ class Message:
     session_id: int
     role: Role
     content: str
-    tool_calls: Optional[dict[str, Any]]
+    tool_calls: dict[str, Any] | None
 
 
 class JournalRepo:

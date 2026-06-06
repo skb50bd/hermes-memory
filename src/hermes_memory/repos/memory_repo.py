@@ -21,8 +21,9 @@ Override hook (for subclasses):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any
 
 # Issue #5: 32 KB raw text cap. Long content is chunked internally.
 MEMORY_MAX_CHARS = 32 * 1024
@@ -40,11 +41,11 @@ class Memory:
     id: int
     content: str
     tags: tuple[str, ...]
-    category: Optional[str]
-    source: Optional[str]
+    category: str | None
+    source: str | None
     embedding_dim: int
     deleted: bool = False
-    created_at: Optional[str] = None
+    created_at: str | None = None
 
     def mark_deleted(self) -> None:
         self.deleted = True

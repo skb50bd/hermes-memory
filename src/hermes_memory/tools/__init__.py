@@ -13,18 +13,21 @@ via `ctx.register_tool(name, fn)`.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from hermes_memory.repos.memory_repo import (
-    MemoryRepo, RoutingRuleViolationError, MemoryNotFoundError,
-)
-from hermes_memory.repos.wiki_repo import WikiRepo
 from hermes_memory.repos.journal_repo import JournalRepo
-from hermes_memory.repos.skills_repo import SkillsRepo
-from hermes_memory.repos.metrics_repo import MetricsRepo
 from hermes_memory.repos.kanban_repo import KanbanRepo
+from hermes_memory.repos.memory_repo import (
+    MemoryNotFoundError,
+    MemoryRepo,
+    RoutingRuleViolationError,
+)
+from hermes_memory.repos.metrics_repo import MetricsRepo
 from hermes_memory.repos.observability_repo import ObservabilityRepo
 from hermes_memory.repos.sessions_repo import SessionsRepo
+from hermes_memory.repos.skills_repo import SkillsRepo
+from hermes_memory.repos.wiki_repo import WikiRepo
 
 
 def _json(obj: Any) -> str:

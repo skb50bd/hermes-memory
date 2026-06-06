@@ -35,11 +35,10 @@ import os
 from typing import Literal
 
 from hermes_memory.repos.memory_repo import (
+    MemoryNotFoundError,
     MemoryRepo,
     RoutingRuleViolationError,
-    MemoryNotFoundError,
 )
-
 
 # Provider constants
 PROVIDER_POSTGRES = "postgres"

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -28,7 +28,7 @@ class SessionMessage:
     session_id: int
     role: str
     content: str
-    tool_calls: Optional[dict[str, Any]]
+    tool_calls: dict[str, Any] | None
     created_at: datetime
 
 

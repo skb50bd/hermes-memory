@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 LinkKind = Literal["depends_on", "supersedes", "related", "see_also"]
 
 

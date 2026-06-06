@@ -1,0 +1,66 @@
+name: hermes-postgres-memory
+version: 2.0.0
+description: >-
+  PostgreSQL + pgvector memory, wiki, journal, skills, metrics,
+  kanban, sessions, and observability for Hermes Agent. Pure-Python,
+  in-process plugin, no MCP overhead. Replaces the built-in `memory`
+  tool (issue #8) and chunks long memories (issue #5).
+author: Shakib Haris
+license: MIT
+pip_dependencies:
+  - psycopg[binary]>=3.1
+  - httpx>=0.27
+requires_env:
+  - HERMES_PG_CONN_STR
+hooks:
+  - on_session_end
+  - pre_tool_call
+overrides_builtin:
+  - memory
+provides_tools:
+  - memory_remember
+  - memory_search
+  - memory_forget
+  - memory_status
+  - wiki_create
+  - wiki_read
+  - wiki_link
+  - wiki_backlinks
+  - wiki_related
+  - wiki_search
+  - journal_log_session
+  - journal_log_message
+  - journal_search
+  - skill_index_search
+  - skill_register
+  - skill_link
+  - skill_graph
+  - metrics_record
+  - metrics_query
+  - kanban_tenant_create
+  - kanban_tenants
+  - kanban_create
+  - kanban_list
+  - kanban_get
+  - kanban_claim
+  - kanban_heartbeat
+  - kanban_complete
+  - kanban_fail
+  - kanban_comment
+  - kanban_history
+  - kanban_link
+  - kanban_children
+  - kanban_parents
+  - kanban_subscribe
+  - kanban_unsubscribe
+  - kanban_search
+  - obs_log
+  - obs_record_llm
+  - obs_record_tool
+  - obs_flush
+  - session_open
+  - session_append
+  - session_messages
+  - session_lock_acquire
+  - session_lock_release
+  - session_close

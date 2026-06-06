@@ -15,8 +15,7 @@ Public surface:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
-
+from typing import Any, Literal
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -46,7 +45,7 @@ class ToolCall:
     tool: str
     duration_ms: int
     status: str
-    error: Optional[str]
+    error: str | None
 
 
 class ObservabilityRepo:

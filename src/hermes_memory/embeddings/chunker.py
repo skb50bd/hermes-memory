@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 #: Approximate chars per token for English text. 4 is the standard
 #: OpenAI/Claude heuristic; works well for English, Latin-script
 #: European languages, and basic CJK (slight undercount for CJK).

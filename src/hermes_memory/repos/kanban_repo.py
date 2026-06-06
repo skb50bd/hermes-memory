@@ -32,8 +32,7 @@ from __future__ import annotations
 import secrets
 import string
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
-
+from typing import Any, Literal
 
 TaskStatus = Literal[
     "ready", "running", "blocked", "done",
@@ -59,12 +58,12 @@ class Task:
     body: str
     status: TaskStatus
     priority: int
-    assignee: Optional[str]
-    parent_id: Optional[str]
+    assignee: str | None
+    parent_id: str | None
     tags: tuple[str, ...]
-    skills_json: Optional[str]
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    skills_json: str | None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 @dataclass
@@ -139,12 +138,12 @@ class KanbanRepo:
             tenant_slug, status=status, assignee=assignee, limit=limit
         )
 
-    def get(self, task_id: str) -> Optional[Task]:
+    def get(self, task_id: str) -> Task | None:
         return self._fetch_task(task_id)
 
     def claim(
         self, assignee: str, *, max_runtime_seconds: int = 0
-    ) -> Optional[Task]:
+    ) -> Task | None:
         if not assignee:
             raise ValueError("assignee must be non-empty")
         return self._claim_next(assignee, max_runtime_seconds)

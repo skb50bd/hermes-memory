@@ -11,8 +11,9 @@ Public surface (from the C# WikiTools.cs):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any
 
 
 @dataclass
@@ -21,7 +22,7 @@ class Document:
     slug: str
     title: str
     body_md: str
-    category: Optional[str]
+    category: str | None
     metadata: dict[str, Any]
     tags: tuple[str, ...] = ()
 
@@ -50,7 +51,7 @@ class WikiRepo:
             metadata=metadata or {},
         )
 
-    def read(self, slug: str) -> Optional[Document]:
+    def read(self, slug: str) -> Document | None:
         return self._fetch_document(slug)
 
     def link(
